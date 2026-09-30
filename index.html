@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Exam Seating & 2D Door Chart Portal</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- PapaParse for CSV parsing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <style>
+    @media print {
+      body * { visibility: hidden; }
+      #printArea, #printArea * { visibility: visible; }
+      #printArea { position: absolute; left: 0; top: 0; width: 100%; }
+      .page-break { page-break-after: always; break-after: page; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen">
+
+  <!-- Top Navigation Bar -->
+  <header class="bg-indigo-900 text-white shadow-md no-print">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex flex-wrap justify-between items-center">
+      <div>
+        <h1 class="text-xl font-bold tracking-tight">Examination Seating & 2D Hall Portal</h1>
+        <p class="text-xs text-indigo-200">Confidential Client-Side Automated Seating Allocator</p>
+      </div>
+      <div class="flex items-center space-x-2 mt-2 sm:mt-0">
+        <button id="loadDemoBtn" class="bg-indigo-700 hover:bg-indigo-600 text-xs px-3 py-1.5 rounded font-medium border border-indigo-500 transition">
+          Load Sample Demo Data
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="max-w-7xl mx-auto px-4 py-6 no-print">
+    
+    <!-- Tab Controls -->
+    <div class="flex border-b border-slate-300 space-x-2 mb-6">
+      <button onclick="switchTab('uploadTab')" id="tabBtn-uploadTab" class="tab-btn py-2 px-4 border-b-2 font-medium text-sm border-indigo-700 text-indigo-700">
+        1. Upload & Setup
+      </button>
+      <button onclick="switchTab('visualizerTab')" id="tabBtn-visualizerTab" class="tab-btn py-2 px-4 border-b-2 font-medium text-sm border-transparent text-slate-500 hover:text-slate-700">
+        2. 2D Hall Visualizer
+      </button>
+      <button onclick="switchTab('summaryTab')" id="tabBtn-summaryTab" class="tab-btn py-2 px-4 border-b-2 font-medium text-sm border-transparent text-slate-500 hover:text-slate-700">
+        3. Invigilation Packets
+      </button>
+      <button onclick="switchTab('doorChartTab')" id="tabBtn-doorChartTab" class="tab-btn py-2 px-4 border-b-2 font-medium text-sm border-transparent text-slate-500 hover:text-slate-700">
+        4. Printable Door Charts
+      </button>
+    </div>
+
+    <!-- TAB 1: UPLOAD & SETUP -->
+    <section id="uploadTab" class="tab-content block">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        
+        <!-- Students CSV Upload Card -->
+        <div class="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
+          <div class="flex justify-between items-center mb-2">
+            <h2 class="font-semibold text-slate-900">1. Student Candidate Roster</h2>
+            <button onclick="downloadStudentTemplate()" class="text-xs text-indigo-600 hover:underline font-medium">Download Template</button>
+          </div>
+          <p class="text-xs text-slate-500 mb-3">Required columns: <code class="bg-slate-100 px-1 py-0.5 rounded text-indigo-800">RollNo,CandidateName,Program,SubjectCode</code></p>
+          <input type="file" id="studentsFileInput" accept=".csv" class="block w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer border border-slate-300 rounded p-1"/>
+          <div id="studentsStatus" class="mt-2 text-xs text-slate-600">No file chosen yet.</div>
+        </div>
+
+        <!-- Rooms CSV Upload Card -->
+        <div class="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
+          <div class="flex justify-between items-center mb-2">
+            <h2 class="font-semibold text-slate-900">2. Examination Hall Capacities</h2>
+            <button onclick="downloadRoomTemplate()" class="text-xs text-indigo-600 hover:underline font-medium">Download Template</button>
+          </div>
+          <p class="text-xs text-slate-500 mb-3">Required columns: <code class="bg-slate-100 px-1 py-0.5 rounded text-indigo-800">RoomNo,BenchRows,BenchCols</code> (2 seats/bench)</p>
+          <input type="file" id="roomsFileInput" accept=".csv" class="block w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer border border-slate-300 rounded p-1"/>
+          <div id="roomsStatus" class="mt-2 text-xs text-slate-600">No file chosen yet.</div>
+        </div>
+      </div>
+
+      <!-- Action Button -->
+      <div class="mt-6 flex items-center justify-between bg-white p-4 rounded-lg shadow-sm border border-slate-200">
+        <div>
+          <span id="allocOverview" class="text-sm font-medium text-slate-700">Upload both files or click "Load Sample Demo Data" to begin.</span>
+        </div>
+        <button id="runAllocationBtn" class="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded text-sm font-medium shadow transition">
+          Generate 2D Alternating Seating
+        </button>
+      </div>
+    </section>
+
+    <!-- TAB 2: 2D VISUALIZER -->
+    <section id="visualizerTab" class="tab-content hidden">
+      <div class="bg-white p-4 rounded-lg shadow-sm border border-slate-200 mb-4 flex flex-wrap justify-between items-center gap-3">
+        <div class="flex items-center space-x-3">
+          <label for="roomSelect" class="text-sm font-semibold text-slate-700">Select Room:</label>
+          <select id="roomSelect" class="border border-slate-300 rounded px-3 py-1.5 text-sm bg-white text-slate-800 font-medium"></select>
+        </div>
+        <div class="flex items-center space-x-2">
+          <input type="text" id="searchRoll" placeholder="Search Roll No..." class="border border-slate-300 rounded px-3 py-1.5 text-xs w-48">
+          <button onclick="downloadMasterCSV()" class="bg-slate-700 hover:bg-slate-600 text-white text-xs px-3 py-1.5 rounded transition">Export Master CSV</button>
+        </div>
+      </div>
+
+      <!-- Interactive 2D Room Grid Display -->
+      <div class="bg-white p-6 rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
+        <div class="w-full text-center py-2 bg-slate-800 text-slate-200 rounded font-bold text-xs uppercase tracking-widest mb-6">
+          [ Front of Room: Blackboard / Invigilator Podium ]
+        </div>
+        <div id="visualGridContainer" class="flex justify-center"></div>
+      </div>
+    </section>
+
+    <!-- TAB 3: INVIGILATION SUMMARY -->
+    <section id="summaryTab" class="tab-content hidden">
+      <div class="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="font-bold text-slate-900 text-base">Question Paper Bundle & Invigilation Summary</h2>
+          <button onclick="downloadSummaryCSV()" class="bg-slate-700 hover:bg-slate-600 text-white text-xs px-3 py-1.5 rounded transition">Download Summary CSV</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table id="summaryTable" class="w-full text-left text-xs text-slate-700 border border-slate-200">
+            <thead class="bg-slate-50 font-semibold text-slate-900 border-b border-slate-200">
+              <tr>
+                <th class="p-2.5">Room No</th>
+                <th class="p-2.5">Subject Code</th>
+                <th class="p-2.5">Programme</th>
+                <th class="p-2.5 text-center">Candidate Count</th>
+                <th class="p-2.5">Roll Number Range</th>
+              </tr>
+            </thead>
+            <tbody id="summaryTableBody" class="divide-y divide-slate-200"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: PRINTABLE DOOR CHARTS -->
+    <section id="doorChartTab" class="tab-content hidden">
+      <div class="bg-white p-4 rounded-lg shadow-sm border border-slate-200 mb-6 flex justify-between items-center">
+        <span class="text-sm font-medium text-slate-700">Preview door notices formatted for standard A4 landscape printouts.</span>
+        <button onclick="window.print()" class="bg-indigo-700 hover:bg-indigo-600 text-white px-4 py-2 rounded text-xs font-semibold shadow transition">
+          Print / Save PDF Door Charts
+        </button>
+      </div>
+      <div id="doorChartPreview" class="space-y-6"></div>
+    </section>
+
+  </main>
+
+  <!-- Hidden Dedicated Printable Container for window.print() -->
+  <div id="printArea" class="hidden"></div>
+
+  <!-- Application Logic -->
+  <script>
+    let globalStudents = [];
+    let globalRooms = [];
+    let masterAllocation = [];
+
+    // --- Tab Switching Logic ---
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('border-indigo-700', 'text-indigo-700');
+        btn.classList.add('border-transparent', 'text-slate-500');
+      });
+      document.getElementById(tabId).classList.remove('hidden');
+      const activeBtn = document.getElementById('tabBtn-' + tabId);
+      if(activeBtn) {
+        activeBtn.classList.add('border-indigo-700', 'text-indigo-700');
+        activeBtn.classList.remove('border-transparent', 'text-slate-500');
+      }
+    }
+
+    // --- CSV File Parsers ---
+    document.getElementById('studentsFileInput').addEventListener('change', function(e) {
+      if (!e.target.files.length) return;
+      Papa.parse(e.target.files[0], {
+        header: true,
+        skipEmptyLines: true,
+        complete: function(results) {
+          globalStudents = results.data;
+          document.getElementById('studentsStatus').innerText = `Loaded ${globalStudents.length} candidates.`;
+          updateOverview();
+        }
+      });
+    });
+
+    document.getElementById('roomsFileInput').addEventListener('change', function(e) {
+      if (!e.target.files.length) return;
+      Papa.parse(e.target.files[0], {
+        header: true,
+        skipEmptyLines: true,
+        complete: function(results) {
+          globalRooms = results.data;
+          document.getElementById('roomsStatus').innerText = `Loaded ${globalRooms.length} room layouts.`;
+          updateOverview();
+        }
+      });
+    });
+
+    function updateOverview() {
+      const totCap = globalRooms.reduce((acc, r) => acc + (parseInt(r.BenchRows) * parseInt(r.BenchCols) * 2), 0);
+      document.getElementById('allocOverview').innerText = 
+        `Candidates: ${globalStudents.length} | Available Capacity: ${totCap} desks (${globalRooms.length} rooms)`;
+    }
+
+    // --- Sample Demo Data Loader ---
+    document.getElementById('loadDemoBtn').addEventListener('click', function() {
+      globalStudents = [
+        { RollNo: "BCOM-101", CandidateName: "Aarav Shah", Program: "B.Com", SubjectCode: "MAFAR105" },
+        { RollNo: "BCOM-102", CandidateName: "Bhavik Mehta", Program: "B.Com", SubjectCode: "MAFAR105" },
+        { RollNo: "BCOM-103", CandidateName: "Chetan Joshi", Program: "B.Com", SubjectCode: "MAFAR105" },
+        { RollNo: "BCOM-104", CandidateName: "Deepak Patil", Program: "B.Com", SubjectCode: "MAFAR105" },
+        { RollNo: "BCOM-105", CandidateName: "Esha Kulkarni", Program: "B.Com", SubjectCode: "MAFAR105" },
+        { RollNo: "BCOM-106", CandidateName: "Farhan Khan", Program: "B.Com", SubjectCode: "MAFAR105" },
+        { RollNo: "BCOM-107", CandidateName: "Gauri Deshmukh", Program: "B.Com", SubjectCode: "MAFAR105" },
+        { RollNo: "BCOM-108", CandidateName: "Harsh Varma", Program: "B.Com", SubjectCode: "MAFAR105" },
+        { RollNo: "BCOM-109", CandidateName: "Isha Shinde", Program: "B.Com", SubjectCode: "MAFAR105" },
+        { RollNo: "BCOM-110", CandidateName: "Jayesh Rane", Program: "B.Com", SubjectCode: "MAFAR105" },
+        { RollNo: "BSC-201", CandidateName: "Karan Desai", Program: "B.Sc", SubjectCode: "MSCS103" },
+        { RollNo: "BSC-202", CandidateName: "Leena Pawar", Program: "B.Sc", SubjectCode: "MSCS103" },
+        { RollNo: "BSC-203", CandidateName: "Manish Solanki", Program: "B.Sc", SubjectCode: "MSCS103" },
+        { RollNo: "BSC-204", CandidateName: "Neha Sawant", Program: "B.Sc", SubjectCode: "MSCS103" },
+        { RollNo: "BSC-205", CandidateName: "Omkar Parab", Program: "B.Sc", SubjectCode: "MSCS103" },
+        { RollNo: "BSC-206", CandidateName: "Pooja Gavde", Program: "B.Sc", SubjectCode: "MSCS103" },
+        { RollNo: "BSC-207", CandidateName: "Rahul Mane", Program: "B.Sc", SubjectCode: "MSCS103" },
+        { RollNo: "BSC-208", CandidateName: "Sneha Kadam", Program: "B.Sc", SubjectCode: "MSCS103" },
+        { RollNo: "BSC-209", CandidateName: "Tanvi Jadhav", Program: "B.Sc", SubjectCode: "MSCS103" },
+        { RollNo: "BSC-210", CandidateName: "Utkarsh More", Program: "B.Sc", SubjectCode: "MSCS103" }
+      ];
+
+      globalRooms = [
+        { RoomNo: "402", BenchRows: "5", BenchCols: "2" },
+        { RoomNo: "403", BenchRows: "5", BenchCols: "2" }
+      ];
+
+      document.getElementById('studentsStatus').innerText = `Demo loaded: 20 students (B.Com & B.Sc).`;
+      document.getElementById('roomsStatus').innerText = `Demo loaded: 2 halls (Room 402 & 403).`;
+      updateOverview();
+      executeAllocation();
+    });
+
+    // --- 2D Bipartite Parity Allocation Algorithm ---
+    document.getElementById('runAllocationBtn').addEventListener('click', executeAllocation);
+
+    function executeAllocation() {
+      if (!globalStudents.length || !globalRooms.length) {
+        alert("Please load or upload both student rosters and room configurations first.");
+        return;
+      }
+
+      // Group students by subject
+      const subjectGroups = {};
+      globalStudents.forEach(s => {
+        if (!subjectGroups[s.SubjectCode]) subjectGroups[s.SubjectCode] = [];
+        subjectGroups[s.SubjectCode].push(s);
+      });
+
+      // Partition subjects into Stream 0 and Stream 1 to alternate
+      const sortedKeys = Object.keys(subjectGroups).sort((a,b) => subjectGroups[b].length - subjectGroups[a].length);
+      let stream0 = [];
+      let stream1 = [];
+
+      sortedKeys.forEach(k => {
+        if (stream0.length <= stream1.length) {
+          stream0 = stream0.concat(subjectGroups[k]);
+        } else {
+          stream1 = stream1.concat(subjectGroups[k]);
+        }
+      });
+
+      masterAllocation = [];
+
+      globalRooms.forEach(room => {
+        const rows = parseInt(room.BenchRows);
+        const cols = parseInt(room.BenchCols);
+        const roomNo = room.RoomNo.toString();
+
+        let seatNum = 1;
+        // Walking sequence: Column-by-column, front-to-back
+        for (let c = 1; c <= cols; c++) {
+          for (let r = 1; r <= rows; r++) {
+            
+            // Left Seat: parity = (r + 0) % 2
+            const parityL = (r + 0) % 2;
+            let candL = null;
+            if (parityL === 0 && stream0.length) candL = stream0.shift();
+            else if (parityL === 1 && stream1.length) candL = stream1.shift();
+            else if (stream0.length) candL = stream0.shift();
+            else if (stream1.length) candL = stream1.shift();
+
+            masterAllocation.push({
+              RoomNo: roomNo,
+              SeatNo: seatNum++,
+              Row: r,
+              Col: c,
+              Side: 'Left',
+              DeskLabel: `R${r}C${c}-L`,
+              RollNo: candL ? candL.RollNo : '--- VACANT ---',
+              CandidateName: candL ? candL.CandidateName : '-',
+              Program: candL ? candL.Program : '-',
+              SubjectCode: candL ? candL.SubjectCode : '-'
+            });
+
+            // Right Seat: parity = (r + 1) % 2
+            const parityR = (r + 1) % 2;
+            let candR = null;
+            if (parityR === 0 && stream0.length) candR = stream0.shift();
+            else if (parityR === 1 && stream1.length) candR = stream1.shift();
+            else if (stream0.length) candR = stream0.shift();
+            else if (stream1.length) candR = stream1.shift();
+
+            masterAllocation.push({
+              RoomNo: roomNo,
+              SeatNo: seatNum++,
+              Row: r,
+              Col: c,
+              Side: 'Right',
+              DeskLabel: `R${r}C${c}-R`,
+              RollNo: candR ? candR.RollNo : '--- VACANT ---',
+              CandidateName: candR ? candR.CandidateName : '-',
+              Program: candR ? candR.Program : '-',
+              SubjectCode: candR ? candR.SubjectCode : '-'
+            });
+          }
+        }
+      });
+
+      populateRoomDropdown();
+      render2DVisualizer();
+      renderSummaryTable();
+      renderDoorCharts();
+      switchTab('visualizerTab');
+    }
+
+    // --- Render Dropdown ---
+    function populateRoomDropdown() {
+      const roomSelect = document.getElementById('roomSelect');
+      roomSelect.innerHTML = '';
+      const rooms = [...new Set(masterAllocation.map(m => m.RoomNo))];
+      rooms.forEach(r => {
+        const opt = document.createElement('option');
+        opt.value = r;
+        opt.innerText = `Room ${r}`;
+        roomSelect.appendChild(opt);
+      });
+      roomSelect.onchange = render2DVisualizer;
+    }
+
+    // --- Render 2D Hall Grid ---
+    function render2DVisualizer() {
+      const selectedRoom = document.getElementById('roomSelect').value;
+      const container = document.getElementById('visualGridContainer');
+      container.innerHTML = '';
+
+      const roomData = masterAllocation.filter(m => m.RoomNo === selectedRoom);
+      if (!roomData.length) return;
+
+      const maxRow = Math.max(...roomData.map(m => m.Row));
+      const maxCol = Math.max(...roomData.map(m => m.Col));
+
+      const gridMap = {};
+      roomData.forEach(d => {
+        gridMap[`${d.Row}-${d.Col}-${d.Side}`] = d;
+      });
+
+      // Build bench layout
+      const hallDiv = document.createElement('div');
+      hallDiv.className = "flex space-x-6 justify-center";
+
+      for (let c = 1; c <= maxCol; c++) {
+        const colDiv = document.createElement('div');
+        colDiv.className = "flex flex-col space-y-3";
+        
+        const colTitle = document.createElement('div');
+        colTitle.className = "text-center font-bold text-xs text-slate-500 mb-1";
+        colTitle.innerText = `COL ${c}`;
+        colDiv.appendChild(colTitle);
+
+        for (let r = 1; r <= maxRow; r++) {
+          const benchDiv = document.createElement('div');
+          benchDiv.className = "border-2 border-slate-300 rounded p-1.5 bg-slate-50 flex space-x-1 shadow-sm";
+
+          const candL = gridMap[`${r}-${c}-Left`];
+          const candR = gridMap[`${r}-${c}-Right`];
+
+          benchDiv.appendChild(createDeskTile(candL));
+          benchDiv.appendChild(createDeskTile(candR));
+          colDiv.appendChild(benchDiv);
+        }
+        hallDiv.appendChild(colDiv);
+      }
+      container.appendChild(hallDiv);
+    }
+
+    function createDeskTile(cand) {
+      const tile = document.createElement('div');
+      const isVacant = !cand || cand.RollNo === '--- VACANT ---';
+      tile.className = `w-28 p-2 rounded text-center border text-xs flex flex-col justify-center ${
+        isVacant ? 'bg-slate-100 border-dashed border-slate-300 text-slate-400' : 'bg-white border-indigo-200 text-slate-800 shadow-xs'
+      }`;
+      tile.dataset.roll = cand ? cand.RollNo.toLowerCase() : '';
+
+      if (isVacant) {
+        tile.innerHTML = `<span class="font-bold text-[10px] text-slate-400">${cand ? cand.DeskLabel : ''}</span><span class="text-[10px]">VACANT</span>`;
+      } else {
+        const isStream0 = cand.RollNo.startsWith('BCOM');
+        const badgeColor = isStream0 ? 'bg-blue-100 text-blue-800' : 'bg-emerald-100 text-emerald-800';
+        tile.innerHTML = `
+          <div class="text-[10px] font-bold text-slate-400 mb-0.5">${cand.DeskLabel}</div>
+          <div class="font-bold text-slate-900">${cand.RollNo}</div>
+          <div class="text-[10px] px-1 py-0.5 rounded font-medium mt-1 ${badgeColor}">${cand.SubjectCode}</div>
+        `;
+      }
+      return tile;
+    }
+
+    // Live Roll Search Highlight
+    document.getElementById('searchRoll').addEventListener('input', function(e) {
+      const q = e.target.value.trim().toLowerCase();
+      document.querySelectorAll('#visualGridContainer [data-roll]').forEach(tile => {
+        if (q && tile.dataset.roll.includes(q)) {
+          tile.classList.add('ring-2', 'ring-red-500', 'bg-yellow-50');
+        } else {
+          tile.classList.remove('ring-2', 'ring-red-500', 'bg-yellow-50');
+        }
+      });
+    });
+
+    // --- Render Invigilation Summary Table ---
+    function renderSummaryTable() {
+      const tbody = document.getElementById('summaryTableBody');
+      tbody.innerHTML = '';
+
+      const grouped = {};
+      masterAllocation.filter(m => m.RollNo !== '--- VACANT ---').forEach(m => {
+        const key = `${m.RoomNo}_${m.SubjectCode}_${m.Program}`;
+        if (!grouped[key]) {
+          grouped[key] = { RoomNo: m.RoomNo, SubjectCode: m.SubjectCode, Program: m.Program, Rolls: [] };
+        }
+        grouped[key].Rolls.push(m.RollNo);
+      });
+
+      Object.values(grouped).forEach(g => {
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-50";
+        tr.innerHTML = `
+          <td class="p-2.5 font-bold">${g.RoomNo}</td>
+          <td class="p-2.5 font-semibold text-indigo-700">${g.SubjectCode}</td>
+          <td class="p-2.5">${g.Program}</td>
+          <td class="p-2.5 text-center font-bold text-slate-900">${g.Rolls.length}</td>
+          <td class="p-2.5 text-slate-600 font-mono text-[11px]">${g.Rolls[0]} &rarr; ${g.Rolls[g.Rolls.length - 1]}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // --- Render Door Notices (Screen Preview + Print Area) ---
+    function renderDoorCharts() {
+      const preview = document.getElementById('doorChartPreview');
+      const printArea = document.getElementById('printArea');
+      preview.innerHTML = '';
+      printArea.innerHTML = '';
+
+      const rooms = [...new Set(masterAllocation.map(m => m.RoomNo))];
+
+      rooms.forEach(rNo => {
+        const roomData = masterAllocation.filter(m => m.RoomNo === rNo);
+        const maxRow = Math.max(...roomData.map(m => m.Row));
+        const maxCol = Math.max(...roomData.map(m => m.Col));
+
+        const gridMap = {};
+        roomData.forEach(d => { gridMap[`${d.Row}-${d.Col}-${d.Side}`] = d; });
+
+        let tableHtml = `<table class="w-full text-center border-collapse border border-slate-400 text-xs"><thead><tr class="bg-slate-100">`;
+        tableHtml += `<th class="border border-slate-300 p-1.5">Row</th>`;
+        for (let c = 1; c <= maxCol; c++) {
+          tableHtml += `<th colspan="2" class="border border-slate-300 p-1.5">Bench Col ${c}</th>`;
+        }
+        tableHtml += `</tr><tr class="bg-slate-50 text-[10px] text-slate-500"><th></th>`;
+        for (let c = 1; c <= maxCol; c++) {
+          tableHtml += `<th class="border border-slate-300 p-1">Left</th><th class="border border-slate-300 p-1">Right</th>`;
+        }
+        tableHtml += `</tr></thead><tbody>`;
+
+        for (let r = 1; r <= maxRow; r++) {
+          tableHtml += `<tr><td class="border border-slate-300 p-1.5 font-bold bg-slate-50">R${r}</td>`;
+          for (let c = 1; c <= maxCol; c++) {
+            const candL = gridMap[`${r}-${c}-Left`];
+            const candR = gridMap[`${r}-${c}-Right`];
+            tableHtml += formatPrintCell(candL);
+            tableHtml += formatPrintCell(candR);
+          }
+          tableHtml += `</tr>`;
+        }
+        tableHtml += `</tbody></table>`;
+
+        // Card Container
+        const card = document.createElement('div');
+        card.className = "bg-white p-6 border border-slate-300 rounded shadow-sm page-break";
+        card.innerHTML = `
+          <div class="text-center pb-3 border-b border-slate-200 mb-4">
+            <h2 class="text-lg font-bold text-slate-900 uppercase tracking-wide">EXAMINATION SEATING ARRANGEMENT</h2>
+            <div class="text-sm font-semibold text-indigo-900">ROOM / HALL NUMBER: ${rNo}</div>
+            <div class="text-xs text-slate-500 mt-1">[ FRONT OF ROOM: BLACKBOARD / INVIGILATOR DESK ]</div>
+          </div>
+          ${tableHtml}
+          <div class="mt-6 flex justify-between text-xs text-slate-500 pt-3 border-t border-slate-200">
+            <span>Room Capacity: ${roomData.length}</span>
+            <span>Allocated Candidates: ${roomData.filter(m => m.RollNo !== '--- VACANT ---').length}</span>
+            <span>Invigilator Signature: __________________</span>
+          </div>
+        `;
+
+        preview.appendChild(card.cloneNode(true));
+        printArea.appendChild(card);
+      });
+    }
+
+    function formatPrintCell(cand) {
+      if (!cand || cand.RollNo === '--- VACANT ---') {
+        return `<td class="border border-slate-300 p-1 text-slate-300 font-mono text-[10px]">VACANT</td>`;
+      }
+      return `
+        <td class="border border-slate-300 p-1.5 font-semibold text-slate-900">
+          <div>${cand.RollNo}</div>
+          <div class="text-[9px] text-indigo-700 font-normal">${cand.SubjectCode}</div>
+        </td>
+      `;
+    }
+
+    // --- CSV Downloaders ---
+    function downloadMasterCSV() {
+      if (!masterAllocation.length) return alert("Run allocation first.");
+      const csv = Papa.unparse(masterAllocation);
+      triggerDownload(csv, "master_exam_seating_allocation.csv");
+    }
+
+    function downloadSummaryCSV() {
+      if (!masterAllocation.length) return alert("Run allocation first.");
+      const grouped = {};
+      masterAllocation.filter(m => m.RollNo !== '--- VACANT ---').forEach(m => {
+        const key = `${m.RoomNo}_${m.SubjectCode}_${m.Program}`;
+        if (!grouped[key]) {
+          grouped[key] = { RoomNo: m.RoomNo, SubjectCode: m.SubjectCode, Program: m.Program, Count: 0, FirstRoll: m.RollNo, LastRoll: m.RollNo };
+        }
+        grouped[key].Count++;
+        grouped[key].LastRoll = m.RollNo;
+      });
+      const rows = Object.values(grouped).map(g => ({
+        RoomNo: g.RoomNo,
+        SubjectCode: g.SubjectCode,
+        Program: g.Program,
+        CandidateCount: g.Count,
+        RollNoSpan: `${g.FirstRoll} to ${g.LastRoll}`
+      }));
+      triggerDownload(Papa.unparse(rows), "invigilation_packet_summary.csv");
+    }
+
+    function downloadStudentTemplate() {
+      const csv = "RollNo,CandidateName,Program,SubjectCode\nBCOM-101,Sample Student 1,B.Com,MAFAR105\nBSC-201,Sample Student 2,B.Sc,MSCS103";
+      triggerDownload(csv, "template_students.csv");
+    }
+
+    function downloadRoomTemplate() {
+      const csv = "RoomNo,BenchRows,BenchCols\n402,5,2\n403,5,2";
+      triggerDownload(csv, "template_rooms.csv");
+    }
+
+    function triggerDownload(content, filename) {
+      const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.setAttribute("download", filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  </script>
+</body>
+</html>
