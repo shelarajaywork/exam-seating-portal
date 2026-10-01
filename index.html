@@ -6,13 +6,16 @@
   <title>Exam Seating & 2D Door Chart Portal</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- PapaParse for CSV parsing -->
+  <!-- PapaParse for CSV export -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <!-- SheetJS for reading/writing Excel -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <style>
+    @page { size: A4 landscape; margin: 10mm; }
     @media print {
       body * { visibility: hidden; }
       #printArea, #printArea * { visibility: visible; }
-      #printArea { position: absolute; left: 0; top: 0; width: 100%; }
+      #printArea { display: block !important; position: absolute; left: 0; top: 0; width: 100%; }
       .page-break { page-break-after: always; break-after: page; }
       .no-print { display: none !important; }
     }
@@ -37,11 +40,11 @@
 
   <!-- Main Content Container -->
   <main class="max-w-7xl mx-auto px-4 py-6 no-print">
-    
+
     <!-- Tab Controls -->
-    <div class="flex border-b border-slate-300 space-x-2 mb-6">
+    <div class="flex flex-wrap border-b border-slate-300 space-x-2 mb-6">
       <button onclick="switchTab('uploadTab')" id="tabBtn-uploadTab" class="tab-btn py-2 px-4 border-b-2 font-medium text-sm border-indigo-700 text-indigo-700">
-        1. Upload & Setup
+        1. Upload & Room Setup
       </button>
       <button onclick="switchTab('visualizerTab')" id="tabBtn-visualizerTab" class="tab-btn py-2 px-4 border-b-2 font-medium text-sm border-transparent text-slate-500 hover:text-slate-700">
         2. 2D Hall Visualizer
@@ -52,39 +55,74 @@
       <button onclick="switchTab('doorChartTab')" id="tabBtn-doorChartTab" class="tab-btn py-2 px-4 border-b-2 font-medium text-sm border-transparent text-slate-500 hover:text-slate-700">
         4. Printable Door Charts
       </button>
+      <button onclick="switchTab('reportsTab')" id="tabBtn-reportsTab" class="tab-btn py-2 px-4 border-b-2 font-medium text-sm border-transparent text-slate-500 hover:text-slate-700">
+        5. Reports by Exam Date
+      </button>
+    </div>
+
+    <!-- Shared Exam Date filter (tabs 2-4) -->
+    <div id="dateBar" class="hidden bg-white p-3 rounded-lg shadow-sm border border-slate-200 mb-4 flex items-center space-x-3">
+      <label for="dateSelect" class="text-sm font-semibold text-slate-700">Exam Date:</label>
+      <select id="dateSelect" class="border border-slate-300 rounded px-3 py-1.5 text-sm bg-white text-slate-800 font-medium"></select>
+      <span id="dateInfo" class="text-xs text-slate-500"></span>
     </div>
 
     <!-- TAB 1: UPLOAD & SETUP -->
     <section id="uploadTab" class="tab-content block">
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        
-        <!-- Students CSV Upload Card -->
-        <div class="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
-          <div class="flex justify-between items-center mb-2">
-            <h2 class="font-semibold text-slate-900">1. Student Candidate Roster</h2>
-            <button onclick="downloadStudentTemplate()" class="text-xs text-indigo-600 hover:underline font-medium">Download Template</button>
-          </div>
-          <p class="text-xs text-slate-500 mb-3">Required columns: <code class="bg-slate-100 px-1 py-0.5 rounded text-indigo-800">RollNo,CandidateName,Program,SubjectCode</code></p>
-          <input type="file" id="studentsFileInput" accept=".csv" class="block w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer border border-slate-300 rounded p-1"/>
-          <div id="studentsStatus" class="mt-2 text-xs text-slate-600">No file chosen yet.</div>
-        </div>
 
-        <!-- Rooms CSV Upload Card -->
-        <div class="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
-          <div class="flex justify-between items-center mb-2">
-            <h2 class="font-semibold text-slate-900">2. Examination Hall Capacities</h2>
-            <button onclick="downloadRoomTemplate()" class="text-xs text-indigo-600 hover:underline font-medium">Download Template</button>
+      <!-- Schedule upload -->
+      <div class="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
+        <h2 class="font-semibold text-slate-900 mb-1">1. Exam Schedule (Excel)</h2>
+        <p class="text-xs text-slate-500 mb-3">
+          Upload <code class="bg-slate-100 px-1 py-0.5 rounded text-indigo-800">ExamSchedule.xlsx</code> with columns:
+          <code class="bg-slate-100 px-1 py-0.5 rounded text-indigo-800">Student Number, Roll No., Student Name, Sr. No., Module Code, Module Description, Exam Date, Start Time, End Time, Room</code>.
+          Each row is one student sitting one module in one room. This replaces the separate student roster and hall capacity files.
+        </p>
+        <input type="file" id="scheduleFileInput" accept=".xlsx,.xls,.csv" class="block w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer border border-slate-300 rounded p-1"/>
+        <div id="scheduleStatus" class="mt-2 text-xs text-slate-600">No file chosen yet.</div>
+      </div>
+
+      <!-- Room layout setup -->
+      <div id="roomSetupCard" class="hidden mt-6 bg-white p-5 rounded-lg shadow-sm border border-slate-200">
+        <div class="flex flex-wrap justify-between items-start gap-3 mb-3">
+          <div>
+            <h2 class="font-semibold text-slate-900">2. Room Layouts (Bench Rows &times; Bench Columns)</h2>
+            <p class="text-xs text-slate-500 mt-1 max-w-3xl">
+              Each bench seats 2 candidates, so capacity = Rows &times; Cols &times; 2. "Peak Candidates" is the largest number of candidates the schedule puts in that room at one time; capacity must cover it.
+              If a room's columns have <b>different numbers of rows</b>, fill in <b>Rows per Column</b> (e.g. <code class="bg-slate-100 px-1 rounded">6,6,5,5</code> = 4 columns, first two with 6 benches, last two with 5). That field overrides Rows/Cols for that room.
+            </p>
           </div>
-          <p class="text-xs text-slate-500 mb-3">Required columns: <code class="bg-slate-100 px-1 py-0.5 rounded text-indigo-800">RoomNo,BenchRows,BenchCols</code> (2 seats/bench)</p>
-          <input type="file" id="roomsFileInput" accept=".csv" class="block w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer border border-slate-300 rounded p-1"/>
-          <div id="roomsStatus" class="mt-2 text-xs text-slate-600">No file chosen yet.</div>
+          <div class="flex items-center space-x-2 text-xs bg-slate-50 border border-slate-200 rounded p-2">
+            <span class="font-semibold text-slate-700">Set all rooms:</span>
+            <input id="bulkRows" type="number" min="1" placeholder="Rows" class="border border-slate-300 rounded px-2 py-1 w-16">
+            <span>&times;</span>
+            <input id="bulkCols" type="number" min="1" placeholder="Cols" class="border border-slate-300 rounded px-2 py-1 w-16">
+            <button onclick="applyBulkLayout()" class="bg-indigo-700 hover:bg-indigo-600 text-white px-3 py-1 rounded font-semibold">Apply</button>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs text-slate-700 border border-slate-200">
+            <thead class="bg-slate-50 font-semibold text-slate-900 border-b border-slate-200">
+              <tr>
+                <th class="p-2.5">Room</th>
+                <th class="p-2.5 text-center">Sessions</th>
+                <th class="p-2.5 text-center">Peak Candidates</th>
+                <th class="p-2.5">BenchRows</th>
+                <th class="p-2.5">BenchCols</th>
+                <th class="p-2.5">Rows per Column (optional)</th>
+                <th class="p-2.5 text-center">Capacity</th>
+                <th class="p-2.5">Status</th>
+              </tr>
+            </thead>
+            <tbody id="roomSetupBody" class="divide-y divide-slate-200"></tbody>
+          </table>
         </div>
       </div>
 
       <!-- Action Button -->
       <div class="mt-6 flex items-center justify-between bg-white p-4 rounded-lg shadow-sm border border-slate-200">
         <div>
-          <span id="allocOverview" class="text-sm font-medium text-slate-700">Upload both files or click "Load Sample Demo Data" to begin.</span>
+          <span id="allocOverview" class="text-sm font-medium text-slate-700">Upload the exam schedule or click "Load Sample Demo Data" to begin.</span>
         </div>
         <button id="runAllocationBtn" class="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded text-sm font-medium shadow transition">
           Generate 2D Alternating Seating
@@ -101,9 +139,10 @@
         </div>
         <div class="flex items-center space-x-2">
           <input type="text" id="searchRoll" placeholder="Search Roll No..." class="border border-slate-300 rounded px-3 py-1.5 text-xs w-48">
-          <button onclick="downloadMasterCSV()" class="bg-slate-700 hover:bg-slate-600 text-white text-xs px-3 py-1.5 rounded transition">Export Master CSV</button>
+          <button onclick="downloadMasterCSV()" class="bg-slate-700 hover:bg-slate-600 text-white text-xs px-3 py-1.5 rounded transition">Export Master CSV (all dates)</button>
         </div>
       </div>
+      <div id="visualLegend" class="flex flex-wrap gap-2 mb-3 text-xs"></div>
 
       <!-- Interactive 2D Room Grid Display -->
       <div class="bg-white p-6 rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
@@ -119,15 +158,16 @@
       <div class="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
         <div class="flex justify-between items-center mb-4">
           <h2 class="font-bold text-slate-900 text-base">Question Paper Bundle & Invigilation Summary</h2>
-          <button onclick="downloadSummaryCSV()" class="bg-slate-700 hover:bg-slate-600 text-white text-xs px-3 py-1.5 rounded transition">Download Summary CSV</button>
+          <button onclick="downloadSummaryCSV()" class="bg-slate-700 hover:bg-slate-600 text-white text-xs px-3 py-1.5 rounded transition">Download Summary CSV (selected date)</button>
         </div>
         <div class="overflow-x-auto">
           <table id="summaryTable" class="w-full text-left text-xs text-slate-700 border border-slate-200">
             <thead class="bg-slate-50 font-semibold text-slate-900 border-b border-slate-200">
               <tr>
                 <th class="p-2.5">Room No</th>
-                <th class="p-2.5">Subject Code</th>
-                <th class="p-2.5">Programme</th>
+                <th class="p-2.5">Time</th>
+                <th class="p-2.5">Module Code</th>
+                <th class="p-2.5">Module Description</th>
                 <th class="p-2.5 text-center">Candidate Count</th>
                 <th class="p-2.5">Roll Number Range</th>
               </tr>
@@ -141,12 +181,43 @@
     <!-- TAB 4: PRINTABLE DOOR CHARTS -->
     <section id="doorChartTab" class="tab-content hidden">
       <div class="bg-white p-4 rounded-lg shadow-sm border border-slate-200 mb-6 flex justify-between items-center">
-        <span class="text-sm font-medium text-slate-700">Preview door notices formatted for standard A4 landscape printouts.</span>
+        <span class="text-sm font-medium text-slate-700">Door notices for the selected exam date, formatted for A4 landscape printouts.</span>
         <button onclick="window.print()" class="bg-indigo-700 hover:bg-indigo-600 text-white px-4 py-2 rounded text-xs font-semibold shadow transition">
           Print / Save PDF Door Charts
         </button>
       </div>
       <div id="doorChartPreview" class="space-y-6"></div>
+    </section>
+
+    <!-- TAB 5: REPORTS BY EXAM DATE -->
+    <section id="reportsTab" class="tab-content hidden">
+      <div class="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
+        <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
+          <h2 class="font-bold text-slate-900 text-base">Download Reports by Exam Date</h2>
+          <div class="flex items-center space-x-3 text-xs">
+            <label class="flex items-center space-x-1 text-slate-700"><input type="checkbox" id="includeVacant"><span>Include vacant seats</span></label>
+            <button onclick="downloadAllDatesXLSX()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded font-semibold">Download All Dates (1 Excel, sheet per date)</button>
+          </div>
+        </div>
+        <p class="text-xs text-slate-500 mb-3">
+          The Excel report for a date has two sheets: <b>Summary</b> (room &times; module counts and roll ranges) and <b>Seating</b> (every candidate with room, seat, bench row/column and side).
+        </p>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs text-slate-700 border border-slate-200">
+            <thead class="bg-slate-50 font-semibold text-slate-900 border-b border-slate-200">
+              <tr>
+                <th class="p-2.5">Exam Date</th>
+                <th class="p-2.5">Time</th>
+                <th class="p-2.5 text-center">Rooms</th>
+                <th class="p-2.5 text-center">Modules</th>
+                <th class="p-2.5 text-center">Candidates</th>
+                <th class="p-2.5">Download</th>
+              </tr>
+            </thead>
+            <tbody id="reportsBody" class="divide-y divide-slate-200"></tbody>
+          </table>
+        </div>
+      </div>
     </section>
 
   </main>
@@ -156,11 +227,26 @@
 
   <!-- Application Logic -->
   <script>
-    let globalStudents = [];
-    let globalRooms = [];
-    let masterAllocation = [];
+    // ---------- State ----------
+    let scheduleRows = [];        // normalised schedule records
+    let roomStats = {};           // room -> { sessions, peak }
+    let roomLayouts = {};         // room -> { rows, cols, perCol }
+    let masterAllocation = [];    // one entry per seat per session
+    let sessionsMeta = [];        // one entry per (date,start,end,room)
+    let currentDate = '';
 
-    // --- Tab Switching Logic ---
+    const LAYOUT_KEY = 'examSeatingRoomLayouts_v1';
+    const MODULE_COLORS = [
+      'bg-blue-100 text-blue-800', 'bg-emerald-100 text-emerald-800', 'bg-amber-100 text-amber-800',
+      'bg-fuchsia-100 text-fuchsia-800', 'bg-cyan-100 text-cyan-800', 'bg-rose-100 text-rose-800'
+    ];
+
+    function esc(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    const natCompare = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+
+    // ---------- Tab Switching ----------
     function switchTab(tabId) {
       document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
       document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -169,413 +255,708 @@
       });
       document.getElementById(tabId).classList.remove('hidden');
       const activeBtn = document.getElementById('tabBtn-' + tabId);
-      if(activeBtn) {
+      if (activeBtn) {
         activeBtn.classList.add('border-indigo-700', 'text-indigo-700');
         activeBtn.classList.remove('border-transparent', 'text-slate-500');
       }
+      const showDateBar = masterAllocation.length && ['visualizerTab', 'summaryTab', 'doorChartTab'].includes(tabId);
+      document.getElementById('dateBar').classList.toggle('hidden', !showDateBar);
     }
 
-    // --- CSV File Parsers ---
-    document.getElementById('studentsFileInput').addEventListener('change', function(e) {
-      if (!e.target.files.length) return;
-      Papa.parse(e.target.files[0], {
-        header: true,
-        skipEmptyLines: true,
-        complete: function(results) {
-          globalStudents = results.data;
-          document.getElementById('studentsStatus').innerText = `Loaded ${globalStudents.length} candidates.`;
-          updateOverview();
-        }
+    // ---------- Excel Parsing ----------
+    const normKey = k => String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const FIELD_MAP = {
+      studentnumber: 'StudentNumber', rollno: 'RollNo', rollnumber: 'RollNo', studentname: 'StudentName',
+      srno: 'SrNo', modulecode: 'ModuleCode', moduledescription: 'ModuleDescription',
+      examdate: 'ExamDate', starttime: 'StartTime', endtime: 'EndTime', room: 'Room'
+    };
+    const REQUIRED = ['RollNo', 'ModuleCode', 'ExamDate', 'Room'];
+
+    function pad2(n) { return String(n).padStart(2, '0'); }
+
+    function toISODate(v) {
+      if (v instanceof Date && !isNaN(v)) return `${v.getFullYear()}-${pad2(v.getMonth() + 1)}-${pad2(v.getDate())}`;
+      if (typeof v === 'number') {
+        const d = new Date(Math.round((v - 25569) * 86400 * 1000)); // Excel serial -> UTC
+        return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+      }
+      const s = String(v ?? '').trim();
+      let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+      if (m) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
+      m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/); // dd/mm/yyyy
+      if (m) return `${m[3]}-${pad2(m[2])}-${pad2(m[1])}`;
+      const d = new Date(s);
+      return isNaN(d) ? s : `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    }
+
+    function toTimeStr(v) {
+      if (typeof v === 'number') {
+        const mins = Math.round((v % 1) * 24 * 60);
+        return `${pad2(Math.floor(mins / 60) % 24)}:${pad2(mins % 60)}`;
+      }
+      const s = String(v ?? '').trim();
+      const m = s.match(/^(\d{1,2}):(\d{2})/);
+      return m ? `${pad2(m[1])}:${m[2]}` : s;
+    }
+
+    function fmtDate(iso) {
+      const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!m) return iso;
+      const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+      return d.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
+    }
+
+    function handleScheduleRecords(rawRows) {
+      if (!rawRows.length) throw new Error('The file has no data rows.');
+      const first = rawRows[0];
+      const keyToField = {};
+      Object.keys(first).forEach(k => { const f = FIELD_MAP[normKey(k)]; if (f) keyToField[k] = f; });
+      const found = new Set(Object.values(keyToField));
+      const missing = REQUIRED.filter(f => !found.has(f));
+      if (missing.length) throw new Error('Missing required column(s): ' + missing.join(', '));
+
+      const rows = [];
+      let skipped = 0;
+      rawRows.forEach(r => {
+        const o = { StudentNumber: '', RollNo: '', StudentName: '', SrNo: '', ModuleCode: '', ModuleDescription: '', ExamDate: '', StartTime: '', EndTime: '', Room: '' };
+        Object.keys(keyToField).forEach(k => { o[keyToField[k]] = r[k]; });
+        o.RollNo = String(o.RollNo ?? '').trim();
+        o.StudentNumber = String(o.StudentNumber ?? '').trim();
+        o.StudentName = String(o.StudentName ?? '').trim();
+        o.ModuleCode = String(o.ModuleCode ?? '').trim();
+        o.ModuleDescription = String(o.ModuleDescription ?? '').trim();
+        o.Room = String(o.Room ?? '').replace(/\s+/g, ' ').trim();
+        o.ExamDate = toISODate(o.ExamDate);
+        o.StartTime = toTimeStr(o.StartTime);
+        o.EndTime = toTimeStr(o.EndTime);
+        if (!o.RollNo || !o.Room || !o.ExamDate || !o.ModuleCode) { skipped++; return; }
+        rows.push(o);
       });
+      if (!rows.length) throw new Error('No usable rows found (Roll No., Module Code, Exam Date and Room are required).');
+      return { rows, skipped };
+    }
+
+    document.getElementById('scheduleFileInput').addEventListener('change', function (e) {
+      if (!e.target.files.length) return;
+      const file = e.target.files[0];
+      const status = document.getElementById('scheduleStatus');
+      status.innerText = 'Reading ' + file.name + ' ...';
+      const reader = new FileReader();
+      reader.onload = function (ev) {
+        try {
+          const wb = XLSX.read(new Uint8Array(ev.target.result), { type: 'array' });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const raw = XLSX.utils.sheet_to_json(ws, { defval: '', raw: true });
+          const { rows, skipped } = handleScheduleRecords(raw);
+          loadSchedule(rows);
+          status.innerText = `Loaded ${rows.length} schedule rows from "${wb.SheetNames[0]}"` + (skipped ? ` (${skipped} incomplete rows skipped).` : '.');
+        } catch (err) {
+          status.innerText = 'Error: ' + err.message;
+        }
+      };
+      reader.onerror = () => { status.innerText = 'Could not read the file.'; };
+      reader.readAsArrayBuffer(file);
     });
 
-    document.getElementById('roomsFileInput').addEventListener('change', function(e) {
-      if (!e.target.files.length) return;
-      Papa.parse(e.target.files[0], {
-        header: true,
-        skipEmptyLines: true,
-        complete: function(results) {
-          globalRooms = results.data;
-          document.getElementById('roomsStatus').innerText = `Loaded ${globalRooms.length} room layouts.`;
-          updateOverview();
-        }
+    // ---------- Schedule -> sessions & room stats ----------
+    function sessionKey(r) { return `${r.ExamDate}|${r.StartTime}|${r.EndTime}|${r.Room}`; }
+
+    function loadSchedule(rows) {
+      scheduleRows = rows;
+      masterAllocation = [];
+      sessionsMeta = [];
+      roomStats = {};
+      const bySession = {};
+      rows.forEach(r => { (bySession[sessionKey(r)] = bySession[sessionKey(r)] || []).push(r); });
+      Object.values(bySession).forEach(list => {
+        const room = list[0].Room;
+        const unique = new Set(list.map(r => r.RollNo + '|' + r.ModuleCode)).size;
+        if (!roomStats[room]) roomStats[room] = { sessions: 0, peak: 0 };
+        roomStats[room].sessions++;
+        roomStats[room].peak = Math.max(roomStats[room].peak, unique);
       });
-    });
+      loadSavedLayouts();
+      renderRoomSetup();
+      document.getElementById('roomSetupCard').classList.remove('hidden');
+      updateOverview();
+    }
+
+    // ---------- Room layout handling ----------
+    function loadSavedLayouts() {
+      let saved = {};
+      try { saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}'); } catch (e) { saved = {}; }
+      roomLayouts = {};
+      Object.keys(roomStats).forEach(room => {
+        roomLayouts[room] = saved[room] || { rows: '', cols: '', perCol: '' };
+      });
+    }
+    function saveLayouts() {
+      try {
+        let saved = {};
+        try { saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}'); } catch (e) { saved = {}; }
+        Object.assign(saved, roomLayouts);
+        localStorage.setItem(LAYOUT_KEY, JSON.stringify(saved));
+      } catch (e) { /* storage unavailable - ignore */ }
+    }
+
+    // Returns array of bench-row counts per column, or null if layout incomplete/invalid
+    function getColRows(layout) {
+      if (!layout) return null;
+      const txt = String(layout.perCol || '').trim();
+      if (txt) {
+        const arr = txt.split(/[,\s;]+/).filter(Boolean).map(Number);
+        if (arr.length && arr.every(n => Number.isInteger(n) && n > 0)) return arr;
+        return null;
+      }
+      const rows = parseInt(layout.rows), cols = parseInt(layout.cols);
+      if (!(rows > 0) || !(cols > 0)) return null;
+      return Array(cols).fill(rows);
+    }
+    const capacityOf = colRows => colRows ? colRows.reduce((a, b) => a + b, 0) * 2 : 0;
+
+    function renderRoomSetup() {
+      const tbody = document.getElementById('roomSetupBody');
+      tbody.innerHTML = '';
+      Object.keys(roomStats).sort(natCompare).forEach(room => {
+        const st = roomStats[room];
+        const lay = roomLayouts[room];
+        const tr = document.createElement('tr');
+        tr.dataset.room = room;
+        tr.innerHTML = `
+          <td class="p-2.5 font-bold">${esc(room)}</td>
+          <td class="p-2.5 text-center">${st.sessions}</td>
+          <td class="p-2.5 text-center font-semibold">${st.peak}</td>
+          <td class="p-2.5"><input type="number" min="1" data-f="rows" value="${esc(lay.rows)}" class="border border-slate-300 rounded px-2 py-1 w-20"></td>
+          <td class="p-2.5"><input type="number" min="1" data-f="cols" value="${esc(lay.cols)}" class="border border-slate-300 rounded px-2 py-1 w-20"></td>
+          <td class="p-2.5"><input type="text" data-f="perCol" value="${esc(lay.perCol)}" placeholder="e.g. 6,6,5,5" class="border border-slate-300 rounded px-2 py-1 w-36"></td>
+          <td class="p-2.5 text-center font-semibold" data-cell="cap"></td>
+          <td class="p-2.5" data-cell="status"></td>`;
+        tr.querySelectorAll('input').forEach(inp => inp.addEventListener('input', () => {
+          roomLayouts[room][inp.dataset.f] = inp.value;
+          refreshRoomRow(tr, room);
+          saveLayouts();
+          updateOverview();
+        }));
+        tbody.appendChild(tr);
+        refreshRoomRow(tr, room);
+      });
+    }
+
+    function refreshRoomRow(tr, room) {
+      const lay = roomLayouts[room];
+      const colRows = getColRows(lay);
+      const cap = capacityOf(colRows);
+      const peak = roomStats[room].peak;
+      const capCell = tr.querySelector('[data-cell="cap"]');
+      const stCell = tr.querySelector('[data-cell="status"]');
+      const hasPerCol = String(lay.perCol || '').trim() !== '';
+      tr.querySelector('[data-f="rows"]').disabled = hasPerCol;
+      tr.querySelector('[data-f="cols"]').disabled = hasPerCol;
+      tr.querySelector('[data-f="rows"]').classList.toggle('bg-slate-100', hasPerCol);
+      tr.querySelector('[data-f="cols"]').classList.toggle('bg-slate-100', hasPerCol);
+      if (!colRows) {
+        capCell.innerText = '-';
+        stCell.innerHTML = hasPerCol
+          ? '<span class="text-red-600 font-medium">Invalid list - use whole numbers like 6,6,5,5</span>'
+          : '<span class="text-amber-600 font-medium">Enter rows &amp; cols</span>';
+      } else if (cap < peak) {
+        capCell.innerText = cap;
+        stCell.innerHTML = `<span class="text-red-600 font-medium">Short by ${peak - cap} seats (need at least ${Math.ceil(peak / 2)} benches)</span>`;
+      } else {
+        capCell.innerText = cap;
+        stCell.innerHTML = `<span class="text-emerald-600 font-medium">OK${hasPerCol ? ' &middot; ' + colRows.length + ' columns' : ''}</span>`;
+      }
+    }
+
+    function applyBulkLayout() {
+      const rows = parseInt(document.getElementById('bulkRows').value);
+      const cols = parseInt(document.getElementById('bulkCols').value);
+      if (!(rows > 0) || !(cols > 0)) return alert('Enter valid Rows and Cols to apply to all rooms.');
+      Object.keys(roomLayouts).forEach(r => { roomLayouts[r] = { rows: String(rows), cols: String(cols), perCol: '' }; });
+      saveLayouts();
+      renderRoomSetup();
+      updateOverview();
+    }
 
     function updateOverview() {
-      const totCap = globalRooms.reduce((acc, r) => acc + (parseInt(r.BenchRows) * parseInt(r.BenchCols) * 2), 0);
-      document.getElementById('allocOverview').innerText = 
-        `Candidates: ${globalStudents.length} | Available Capacity: ${totCap} desks (${globalRooms.length} rooms)`;
+      const el = document.getElementById('allocOverview');
+      if (!scheduleRows.length) { el.innerText = 'Upload the exam schedule or click "Load Sample Demo Data" to begin.'; return; }
+      const students = new Set(scheduleRows.map(r => r.RollNo)).size;
+      const dates = new Set(scheduleRows.map(r => r.ExamDate)).size;
+      const rooms = Object.keys(roomStats);
+      const ready = rooms.filter(r => { const c = getColRows(roomLayouts[r]); return c && capacityOf(c) >= roomStats[r].peak; }).length;
+      el.innerText = `Candidates: ${students} | Exam dates: ${dates} | Rooms: ${rooms.length} (${ready} configured OK)`;
     }
 
-    // --- Sample Demo Data Loader ---
-    document.getElementById('loadDemoBtn').addEventListener('click', function() {
-      globalStudents = [
-        { RollNo: "BCOM-101", CandidateName: "Aarav Shah", Program: "B.Com", SubjectCode: "MAFAR105" },
-        { RollNo: "BCOM-102", CandidateName: "Bhavik Mehta", Program: "B.Com", SubjectCode: "MAFAR105" },
-        { RollNo: "BCOM-103", CandidateName: "Chetan Joshi", Program: "B.Com", SubjectCode: "MAFAR105" },
-        { RollNo: "BCOM-104", CandidateName: "Deepak Patil", Program: "B.Com", SubjectCode: "MAFAR105" },
-        { RollNo: "BCOM-105", CandidateName: "Esha Kulkarni", Program: "B.Com", SubjectCode: "MAFAR105" },
-        { RollNo: "BCOM-106", CandidateName: "Farhan Khan", Program: "B.Com", SubjectCode: "MAFAR105" },
-        { RollNo: "BCOM-107", CandidateName: "Gauri Deshmukh", Program: "B.Com", SubjectCode: "MAFAR105" },
-        { RollNo: "BCOM-108", CandidateName: "Harsh Varma", Program: "B.Com", SubjectCode: "MAFAR105" },
-        { RollNo: "BCOM-109", CandidateName: "Isha Shinde", Program: "B.Com", SubjectCode: "MAFAR105" },
-        { RollNo: "BCOM-110", CandidateName: "Jayesh Rane", Program: "B.Com", SubjectCode: "MAFAR105" },
-        { RollNo: "BSC-201", CandidateName: "Karan Desai", Program: "B.Sc", SubjectCode: "MSCS103" },
-        { RollNo: "BSC-202", CandidateName: "Leena Pawar", Program: "B.Sc", SubjectCode: "MSCS103" },
-        { RollNo: "BSC-203", CandidateName: "Manish Solanki", Program: "B.Sc", SubjectCode: "MSCS103" },
-        { RollNo: "BSC-204", CandidateName: "Neha Sawant", Program: "B.Sc", SubjectCode: "MSCS103" },
-        { RollNo: "BSC-205", CandidateName: "Omkar Parab", Program: "B.Sc", SubjectCode: "MSCS103" },
-        { RollNo: "BSC-206", CandidateName: "Pooja Gavde", Program: "B.Sc", SubjectCode: "MSCS103" },
-        { RollNo: "BSC-207", CandidateName: "Rahul Mane", Program: "B.Sc", SubjectCode: "MSCS103" },
-        { RollNo: "BSC-208", CandidateName: "Sneha Kadam", Program: "B.Sc", SubjectCode: "MSCS103" },
-        { RollNo: "BSC-209", CandidateName: "Tanvi Jadhav", Program: "B.Sc", SubjectCode: "MSCS103" },
-        { RollNo: "BSC-210", CandidateName: "Utkarsh More", Program: "B.Sc", SubjectCode: "MSCS103" }
-      ];
-
-      globalRooms = [
-        { RoomNo: "402", BenchRows: "5", BenchCols: "2" },
-        { RoomNo: "403", BenchRows: "5", BenchCols: "2" }
-      ];
-
-      document.getElementById('studentsStatus').innerText = `Demo loaded: 20 students (B.Com & B.Sc).`;
-      document.getElementById('roomsStatus').innerText = `Demo loaded: 2 halls (Room 402 & 403).`;
+    // ---------- Demo Data ----------
+    document.getElementById('loadDemoBtn').addEventListener('click', function () {
+      const mk = (roll, name, mod, desc, date, room) => ({
+        StudentNumber: '9' + roll.replace(/\D/g, ''), RollNo: roll, StudentName: name, SrNo: 1,
+        ModuleCode: mod, ModuleDescription: desc, ExamDate: date, StartTime: '11:30', EndTime: '12:30', Room: room
+      });
+      const rows = [];
+      for (let i = 1; i <= 12; i++) rows.push(mk('A' + String(i).padStart(3, '0'), 'Demo Student ' + i, 'NGECO101', 'INTRODUCTORY MICROECONOMICS', '2026-10-13', 'Room 402'));
+      for (let i = 13; i <= 24; i++) rows.push(mk('A' + String(i).padStart(3, '0'), 'Demo Student ' + i, 'NGMST104', 'MATHEMATICAL AND STATISTICAL TECHNIQUES I', '2026-10-13', 'Room 402'));
+      for (let i = 1; i <= 24; i++) rows.push(mk('A' + String(i).padStart(3, '0'), 'Demo Student ' + i, 'NGENG109', 'COMMUNICATION SKILLS I', '2026-10-15', 'Room 403'));
+      loadSchedule(rows);
+      roomLayouts['Room 402'] = { rows: '4', cols: '3', perCol: '' };
+      roomLayouts['Room 403'] = { rows: '', cols: '', perCol: '4,4,4,3' };
+      renderRoomSetup();
       updateOverview();
+      document.getElementById('scheduleStatus').innerText = 'Demo loaded: 2 rooms, 2 exam dates (Room 403 shows a different rows-per-column layout).';
       executeAllocation();
     });
 
-    // --- 2D Bipartite Parity Allocation Algorithm ---
+    // ---------- 2D Bipartite Parity Allocation ----------
     document.getElementById('runAllocationBtn').addEventListener('click', executeAllocation);
 
     function executeAllocation() {
-      if (!globalStudents.length || !globalRooms.length) {
-        alert("Please load or upload both student rosters and room configurations first.");
+      if (!scheduleRows.length) return alert('Please upload the exam schedule first.');
+
+      // Validate every room used in the schedule
+      const problems = [];
+      Object.keys(roomStats).sort(natCompare).forEach(room => {
+        const colRows = getColRows(roomLayouts[room]);
+        if (!colRows) problems.push(`${room}: layout not set`);
+        else if (capacityOf(colRows) < roomStats[room].peak) problems.push(`${room}: capacity ${capacityOf(colRows)} is below peak ${roomStats[room].peak}`);
+      });
+      if (problems.length) {
+        alert('Fix these rooms before generating:\n\n' + problems.join('\n'));
         return;
       }
 
-      // Group students by subject
-      const subjectGroups = {};
-      globalStudents.forEach(s => {
-        if (!subjectGroups[s.SubjectCode]) subjectGroups[s.SubjectCode] = [];
-        subjectGroups[s.SubjectCode].push(s);
-      });
-
-      // Partition subjects into Stream 0 and Stream 1 to alternate
-      const sortedKeys = Object.keys(subjectGroups).sort((a,b) => subjectGroups[b].length - subjectGroups[a].length);
-      let stream0 = [];
-      let stream1 = [];
-
-      sortedKeys.forEach(k => {
-        if (stream0.length <= stream1.length) {
-          stream0 = stream0.concat(subjectGroups[k]);
-        } else {
-          stream1 = stream1.concat(subjectGroups[k]);
-        }
-      });
-
       masterAllocation = [];
+      sessionsMeta = [];
 
-      globalRooms.forEach(room => {
-        const rows = parseInt(room.BenchRows);
-        const cols = parseInt(room.BenchCols);
-        const roomNo = room.RoomNo.toString();
+      // Group by session
+      const bySession = {};
+      scheduleRows.forEach(r => { (bySession[sessionKey(r)] = bySession[sessionKey(r)] || []).push(r); });
+      const keys = Object.keys(bySession).sort((a, b) => {
+        const [da, sa, , ra] = a.split('|'), [db, sb, , rb] = b.split('|');
+        return da.localeCompare(db) || sa.localeCompare(sb) || natCompare(ra, rb);
+      });
 
-        let seatNum = 1;
-        // Walking sequence: Column-by-column, front-to-back
-        for (let c = 1; c <= cols; c++) {
-          for (let r = 1; r <= rows; r++) {
-            
-            // Left Seat: parity = (r + 0) % 2
-            const parityL = (r + 0) % 2;
-            let candL = null;
-            if (parityL === 0 && stream0.length) candL = stream0.shift();
-            else if (parityL === 1 && stream1.length) candL = stream1.shift();
-            else if (stream0.length) candL = stream0.shift();
-            else if (stream1.length) candL = stream1.shift();
+      keys.forEach(key => {
+        const list = bySession[key];
+        const { ExamDate, StartTime, EndTime, Room } = list[0];
+        const colRows = getColRows(roomLayouts[Room]);
 
-            masterAllocation.push({
-              RoomNo: roomNo,
-              SeatNo: seatNum++,
-              Row: r,
-              Col: c,
-              Side: 'Left',
-              DeskLabel: `R${r}C${c}-L`,
-              RollNo: candL ? candL.RollNo : '--- VACANT ---',
-              CandidateName: candL ? candL.CandidateName : '-',
-              Program: candL ? candL.Program : '-',
-              SubjectCode: candL ? candL.SubjectCode : '-'
-            });
+        // Dedupe candidates per module, group by module
+        const modules = {};
+        const seen = new Set();
+        list.forEach(s => {
+          const id = s.RollNo + '|' + s.ModuleCode;
+          if (seen.has(id)) return;
+          seen.add(id);
+          (modules[s.ModuleCode] = modules[s.ModuleCode] || []).push(s);
+        });
+        Object.values(modules).forEach(arr => arr.sort((a, b) => natCompare(a.RollNo, b.RollNo)));
 
-            // Right Seat: parity = (r + 1) % 2
-            const parityR = (r + 1) % 2;
-            let candR = null;
-            if (parityR === 0 && stream0.length) candR = stream0.shift();
-            else if (parityR === 1 && stream1.length) candR = stream1.shift();
-            else if (stream0.length) candR = stream0.shift();
-            else if (stream1.length) candR = stream1.shift();
+        // Partition modules into two alternating streams (balanced by size)
+        const modKeys = Object.keys(modules).sort((a, b) => modules[b].length - modules[a].length || natCompare(a, b));
+        let stream0 = [], stream1 = [];
+        modKeys.forEach(k => {
+          if (stream0.length <= stream1.length) stream0 = stream0.concat(modules[k]);
+          else stream1 = stream1.concat(modules[k]);
+        });
+        const modIndex = {};
+        modKeys.forEach((k, i) => { modIndex[k] = i; });
 
-            masterAllocation.push({
-              RoomNo: roomNo,
-              SeatNo: seatNum++,
-              Row: r,
-              Col: c,
-              Side: 'Right',
-              DeskLabel: `R${r}C${c}-R`,
-              RollNo: candR ? candR.RollNo : '--- VACANT ---',
-              CandidateName: candR ? candR.CandidateName : '-',
-              Program: candR ? candR.Program : '-',
-              SubjectCode: candR ? candR.SubjectCode : '-'
-            });
+        // Build the seat walk (column by column, front to back, left then right)
+        const walk = [];
+        for (let c = 1; c <= colRows.length; c++) {
+          for (let r = 1; r <= colRows[c - 1]; r++) {
+            ['Left', 'Right'].forEach((side, si) => walk.push({ r, c, side, parity: (r + si) % 2 }));
           }
         }
+        // remaining[p] = seats of parity p still ahead in the walk (excluding the current one)
+        const remaining = [0, 0];
+        walk.forEach(s => remaining[s.parity]++);
+        const multiModule = modKeys.length > 1;
+
+        const pick = parity => {
+          const mine = parity === 0 ? stream0 : stream1;
+          const other = parity === 0 ? stream1 : stream0;
+          if (mine.length) return mine.shift();
+          if (!other.length) return null;
+          // Single module: fill every seat. Multiple modules: only borrow a seat of the other
+          // parity when the other stream would otherwise not fit in its own parity seats.
+          if (!multiModule || other.length > remaining[1 - parity]) return other.shift();
+          return null;
+        };
+
+        let seatNum = 1;
+        walk.forEach(s => {
+          remaining[s.parity]--;
+          const cand = pick(s.parity);
+          masterAllocation.push({
+            ExamDate, StartTime, EndTime, RoomNo: Room,
+            SeatNo: seatNum++, Row: s.r, Col: s.c, Side: s.side,
+            DeskLabel: `R${s.r}C${s.c}-${s.side[0]}`,
+            Vacant: !cand,
+            RollNo: cand ? cand.RollNo : '',
+            StudentNumber: cand ? cand.StudentNumber : '',
+            CandidateName: cand ? cand.StudentName : '',
+            SubjectCode: cand ? cand.ModuleCode : '',
+            ModuleDescription: cand ? cand.ModuleDescription : '',
+            ModuleIdx: cand ? modIndex[cand.ModuleCode] : -1
+          });
+        });
+        sessionsMeta.push({
+          key, ExamDate, StartTime, EndTime, RoomNo: Room, colRows,
+          capacity: capacityOf(colRows), candidates: seen.size,
+          modules: modKeys.map(k => ({ code: k, desc: modules[k][0].ModuleDescription, count: modules[k].length, idx: modIndex[k] }))
+        });
       });
 
+      populateDateDropdown();
+      refreshViews();
+      renderReportsTab();
+      switchTab('visualizerTab');
+    }
+
+    // ---------- Date filter ----------
+    function allDates() { return [...new Set(sessionsMeta.map(s => s.ExamDate))].sort(); }
+
+    function populateDateDropdown() {
+      const sel = document.getElementById('dateSelect');
+      sel.innerHTML = '';
+      const dates = allDates();
+      dates.forEach(d => {
+        const o = document.createElement('option');
+        o.value = d; o.innerText = fmtDate(d);
+        sel.appendChild(o);
+      });
+      if (!dates.includes(currentDate)) currentDate = dates[0] || '';
+      sel.value = currentDate;
+      sel.onchange = () => { currentDate = sel.value; refreshViews(); };
+    }
+
+    function sessionsOnDate(date) {
+      return sessionsMeta.filter(s => s.ExamDate === date).sort((a, b) => a.StartTime.localeCompare(b.StartTime) || natCompare(a.RoomNo, b.RoomNo));
+    }
+
+    function refreshViews() {
+      const ss = sessionsOnDate(currentDate);
+      const cands = ss.reduce((a, s) => a + s.candidates, 0);
+      document.getElementById('dateInfo').innerText = `${ss.length} room session(s) · ${cands} candidates`;
       populateRoomDropdown();
       render2DVisualizer();
       renderSummaryTable();
       renderDoorCharts();
-      switchTab('visualizerTab');
     }
 
-    // --- Render Dropdown ---
+    // ---------- Room dropdown ----------
     function populateRoomDropdown() {
       const roomSelect = document.getElementById('roomSelect');
+      const prev = roomSelect.value;
       roomSelect.innerHTML = '';
-      const rooms = [...new Set(masterAllocation.map(m => m.RoomNo))];
-      rooms.forEach(r => {
+      sessionsOnDate(currentDate).forEach(s => {
         const opt = document.createElement('option');
-        opt.value = r;
-        opt.innerText = `Room ${r}`;
+        opt.value = s.key;
+        opt.innerText = `${s.RoomNo} (${s.StartTime}-${s.EndTime})`;
         roomSelect.appendChild(opt);
       });
+      if ([...roomSelect.options].some(o => o.value === prev)) roomSelect.value = prev;
       roomSelect.onchange = render2DVisualizer;
     }
 
-    // --- Render 2D Hall Grid ---
+    const seatsOf = sess => masterAllocation.filter(m => m.ExamDate === sess.ExamDate && m.StartTime === sess.StartTime && m.EndTime === sess.EndTime && m.RoomNo === sess.RoomNo);
+
+    // ---------- 2D Hall Grid ----------
     function render2DVisualizer() {
-      const selectedRoom = document.getElementById('roomSelect').value;
+      const key = document.getElementById('roomSelect').value;
       const container = document.getElementById('visualGridContainer');
+      const legend = document.getElementById('visualLegend');
       container.innerHTML = '';
+      legend.innerHTML = '';
+      const sess = sessionsMeta.find(s => s.key === key);
+      if (!sess) return;
 
-      const roomData = masterAllocation.filter(m => m.RoomNo === selectedRoom);
-      if (!roomData.length) return;
-
-      const maxRow = Math.max(...roomData.map(m => m.Row));
-      const maxCol = Math.max(...roomData.map(m => m.Col));
+      legend.innerHTML = sess.modules.map(m =>
+        `<span class="px-2 py-1 rounded font-medium ${MODULE_COLORS[m.idx % MODULE_COLORS.length]}">${esc(m.code)} &middot; ${m.count} candidates</span>`
+      ).join('') + `<span class="px-2 py-1 rounded bg-slate-200 text-slate-700">Capacity ${sess.capacity}</span>`;
 
       const gridMap = {};
-      roomData.forEach(d => {
-        gridMap[`${d.Row}-${d.Col}-${d.Side}`] = d;
-      });
+      seatsOf(sess).forEach(d => { gridMap[`${d.Row}-${d.Col}-${d.Side}`] = d; });
+      const maxRow = Math.max(...sess.colRows);
 
-      // Build bench layout
       const hallDiv = document.createElement('div');
-      hallDiv.className = "flex space-x-6 justify-center";
-
-      for (let c = 1; c <= maxCol; c++) {
+      hallDiv.className = 'flex space-x-6 justify-center';
+      sess.colRows.forEach((rowsInCol, ci) => {
+        const c = ci + 1;
         const colDiv = document.createElement('div');
-        colDiv.className = "flex flex-col space-y-3";
-        
+        colDiv.className = 'flex flex-col space-y-3';
         const colTitle = document.createElement('div');
-        colTitle.className = "text-center font-bold text-xs text-slate-500 mb-1";
+        colTitle.className = 'text-center font-bold text-xs text-slate-500 mb-1';
         colTitle.innerText = `COL ${c}`;
         colDiv.appendChild(colTitle);
-
         for (let r = 1; r <= maxRow; r++) {
+          if (r > rowsInCol) { // shorter column: spacer keeps columns aligned at the front
+            const sp = document.createElement('div');
+            sp.className = 'h-[62px]';
+            colDiv.appendChild(sp);
+            continue;
+          }
           const benchDiv = document.createElement('div');
-          benchDiv.className = "border-2 border-slate-300 rounded p-1.5 bg-slate-50 flex space-x-1 shadow-sm";
-
-          const candL = gridMap[`${r}-${c}-Left`];
-          const candR = gridMap[`${r}-${c}-Right`];
-
-          benchDiv.appendChild(createDeskTile(candL));
-          benchDiv.appendChild(createDeskTile(candR));
+          benchDiv.className = 'border-2 border-slate-300 rounded p-1.5 bg-slate-50 flex space-x-1 shadow-sm';
+          benchDiv.appendChild(createDeskTile(gridMap[`${r}-${c}-Left`]));
+          benchDiv.appendChild(createDeskTile(gridMap[`${r}-${c}-Right`]));
           colDiv.appendChild(benchDiv);
         }
         hallDiv.appendChild(colDiv);
-      }
+      });
       container.appendChild(hallDiv);
+      applyRollSearch();
     }
 
     function createDeskTile(cand) {
       const tile = document.createElement('div');
-      const isVacant = !cand || cand.RollNo === '--- VACANT ---';
+      const isVacant = !cand || cand.Vacant;
       tile.className = `w-28 p-2 rounded text-center border text-xs flex flex-col justify-center ${
         isVacant ? 'bg-slate-100 border-dashed border-slate-300 text-slate-400' : 'bg-white border-indigo-200 text-slate-800 shadow-xs'
       }`;
-      tile.dataset.roll = cand ? cand.RollNo.toLowerCase() : '';
-
+      tile.dataset.roll = cand && !cand.Vacant ? cand.RollNo.toLowerCase() : '';
       if (isVacant) {
         tile.innerHTML = `<span class="font-bold text-[10px] text-slate-400">${cand ? cand.DeskLabel : ''}</span><span class="text-[10px]">VACANT</span>`;
       } else {
-        const isStream0 = cand.RollNo.startsWith('BCOM');
-        const badgeColor = isStream0 ? 'bg-blue-100 text-blue-800' : 'bg-emerald-100 text-emerald-800';
+        const badge = MODULE_COLORS[cand.ModuleIdx % MODULE_COLORS.length];
+        tile.title = cand.CandidateName;
         tile.innerHTML = `
           <div class="text-[10px] font-bold text-slate-400 mb-0.5">${cand.DeskLabel}</div>
-          <div class="font-bold text-slate-900">${cand.RollNo}</div>
-          <div class="text-[10px] px-1 py-0.5 rounded font-medium mt-1 ${badgeColor}">${cand.SubjectCode}</div>
-        `;
+          <div class="font-bold text-slate-900">${esc(cand.RollNo)}</div>
+          <div class="text-[10px] px-1 py-0.5 rounded font-medium mt-1 ${badge}">${esc(cand.SubjectCode)}</div>`;
       }
       return tile;
     }
 
-    // Live Roll Search Highlight
-    document.getElementById('searchRoll').addEventListener('input', function(e) {
-      const q = e.target.value.trim().toLowerCase();
+    function applyRollSearch() {
+      const q = document.getElementById('searchRoll').value.trim().toLowerCase();
       document.querySelectorAll('#visualGridContainer [data-roll]').forEach(tile => {
-        if (q && tile.dataset.roll.includes(q)) {
-          tile.classList.add('ring-2', 'ring-red-500', 'bg-yellow-50');
-        } else {
-          tile.classList.remove('ring-2', 'ring-red-500', 'bg-yellow-50');
-        }
+        const hit = q && tile.dataset.roll.includes(q);
+        tile.classList.toggle('ring-2', !!hit);
+        tile.classList.toggle('ring-red-500', !!hit);
+        tile.classList.toggle('bg-yellow-50', !!hit);
       });
-    });
+    }
+    document.getElementById('searchRoll').addEventListener('input', applyRollSearch);
 
-    // --- Render Invigilation Summary Table ---
+    // ---------- Summary builder (shared by table, CSV and Excel) ----------
+    function buildSummaryRows(date) {
+      const rows = [];
+      sessionsOnDate(date).forEach(sess => {
+        sess.modules.forEach(m => {
+          const rolls = seatsOf(sess).filter(s => !s.Vacant && s.SubjectCode === m.code).map(s => s.RollNo).sort(natCompare);
+          rows.push({
+            ExamDate: sess.ExamDate, StartTime: sess.StartTime, EndTime: sess.EndTime, RoomNo: sess.RoomNo,
+            ModuleCode: m.code, ModuleDescription: m.desc, CandidateCount: m.count,
+            FirstRoll: rolls[0] || '', LastRoll: rolls[rolls.length - 1] || '', RoomCapacity: sess.capacity
+          });
+        });
+      });
+      return rows;
+    }
+
     function renderSummaryTable() {
       const tbody = document.getElementById('summaryTableBody');
       tbody.innerHTML = '';
-
-      const grouped = {};
-      masterAllocation.filter(m => m.RollNo !== '--- VACANT ---').forEach(m => {
-        const key = `${m.RoomNo}_${m.SubjectCode}_${m.Program}`;
-        if (!grouped[key]) {
-          grouped[key] = { RoomNo: m.RoomNo, SubjectCode: m.SubjectCode, Program: m.Program, Rolls: [] };
-        }
-        grouped[key].Rolls.push(m.RollNo);
-      });
-
-      Object.values(grouped).forEach(g => {
+      buildSummaryRows(currentDate).forEach(g => {
         const tr = document.createElement('tr');
-        tr.className = "hover:bg-slate-50";
+        tr.className = 'hover:bg-slate-50';
         tr.innerHTML = `
-          <td class="p-2.5 font-bold">${g.RoomNo}</td>
-          <td class="p-2.5 font-semibold text-indigo-700">${g.SubjectCode}</td>
-          <td class="p-2.5">${g.Program}</td>
-          <td class="p-2.5 text-center font-bold text-slate-900">${g.Rolls.length}</td>
-          <td class="p-2.5 text-slate-600 font-mono text-[11px]">${g.Rolls[0]} &rarr; ${g.Rolls[g.Rolls.length - 1]}</td>
-        `;
+          <td class="p-2.5 font-bold">${esc(g.RoomNo)}</td>
+          <td class="p-2.5">${g.StartTime}-${g.EndTime}</td>
+          <td class="p-2.5 font-semibold text-indigo-700">${esc(g.ModuleCode)}</td>
+          <td class="p-2.5">${esc(g.ModuleDescription)}</td>
+          <td class="p-2.5 text-center font-bold text-slate-900">${g.CandidateCount}</td>
+          <td class="p-2.5 text-slate-600 font-mono text-[11px]">${esc(g.FirstRoll)} &rarr; ${esc(g.LastRoll)}</td>`;
         tbody.appendChild(tr);
       });
     }
 
-    // --- Render Door Notices (Screen Preview + Print Area) ---
-    function renderDoorCharts() {
+    // ---------- Door Notices (Screen Preview + Print Area) ----------
+    function renderDoorCharts() { renderDoorChartsFor(currentDate); }
+
+    function renderDoorChartsFor(date) {
       const preview = document.getElementById('doorChartPreview');
       const printArea = document.getElementById('printArea');
       preview.innerHTML = '';
       printArea.innerHTML = '';
 
-      const rooms = [...new Set(masterAllocation.map(m => m.RoomNo))];
-
-      rooms.forEach(rNo => {
-        const roomData = masterAllocation.filter(m => m.RoomNo === rNo);
-        const maxRow = Math.max(...roomData.map(m => m.Row));
-        const maxCol = Math.max(...roomData.map(m => m.Col));
-
+      sessionsOnDate(date).forEach(sess => {
         const gridMap = {};
-        roomData.forEach(d => { gridMap[`${d.Row}-${d.Col}-${d.Side}`] = d; });
+        seatsOf(sess).forEach(d => { gridMap[`${d.Row}-${d.Col}-${d.Side}`] = d; });
+        const maxRow = Math.max(...sess.colRows);
 
-        let tableHtml = `<table class="w-full text-center border-collapse border border-slate-400 text-xs"><thead><tr class="bg-slate-100">`;
-        tableHtml += `<th class="border border-slate-300 p-1.5">Row</th>`;
-        for (let c = 1; c <= maxCol; c++) {
-          tableHtml += `<th colspan="2" class="border border-slate-300 p-1.5">Bench Col ${c}</th>`;
-        }
-        tableHtml += `</tr><tr class="bg-slate-50 text-[10px] text-slate-500"><th></th>`;
-        for (let c = 1; c <= maxCol; c++) {
-          tableHtml += `<th class="border border-slate-300 p-1">Left</th><th class="border border-slate-300 p-1">Right</th>`;
-        }
-        tableHtml += `</tr></thead><tbody>`;
-
+        let t = `<table class="w-full text-center border-collapse border border-slate-400 text-xs"><thead><tr class="bg-slate-100">`;
+        t += `<th class="border border-slate-300 p-1.5">Row</th>`;
+        sess.colRows.forEach((_, ci) => { t += `<th colspan="2" class="border border-slate-300 p-1.5">Bench Col ${ci + 1}</th>`; });
+        t += `</tr><tr class="bg-slate-50 text-[10px] text-slate-500"><th></th>`;
+        sess.colRows.forEach(() => { t += `<th class="border border-slate-300 p-1">Left</th><th class="border border-slate-300 p-1">Right</th>`; });
+        t += `</tr></thead><tbody>`;
         for (let r = 1; r <= maxRow; r++) {
-          tableHtml += `<tr><td class="border border-slate-300 p-1.5 font-bold bg-slate-50">R${r}</td>`;
-          for (let c = 1; c <= maxCol; c++) {
-            const candL = gridMap[`${r}-${c}-Left`];
-            const candR = gridMap[`${r}-${c}-Right`];
-            tableHtml += formatPrintCell(candL);
-            tableHtml += formatPrintCell(candR);
-          }
-          tableHtml += `</tr>`;
+          t += `<tr><td class="border border-slate-300 p-1.5 font-bold bg-slate-50">R${r}</td>`;
+          sess.colRows.forEach((rowsInCol, ci) => {
+            const c = ci + 1;
+            if (r > rowsInCol) {
+              t += `<td class="border border-slate-300 bg-slate-200"></td><td class="border border-slate-300 bg-slate-200"></td>`;
+            } else {
+              t += formatPrintCell(gridMap[`${r}-${c}-Left`]) + formatPrintCell(gridMap[`${r}-${c}-Right`]);
+            }
+          });
+          t += `</tr>`;
         }
-        tableHtml += `</tbody></table>`;
+        t += `</tbody></table>`;
 
-        // Card Container
+        const modLine = sess.modules.map(m => `${esc(m.code)} (${m.count})`).join(' &nbsp;|&nbsp; ');
         const card = document.createElement('div');
-        card.className = "bg-white p-6 border border-slate-300 rounded shadow-sm page-break";
+        card.className = 'bg-white p-6 border border-slate-300 rounded shadow-sm page-break';
         card.innerHTML = `
           <div class="text-center pb-3 border-b border-slate-200 mb-4">
             <h2 class="text-lg font-bold text-slate-900 uppercase tracking-wide">EXAMINATION SEATING ARRANGEMENT</h2>
-            <div class="text-sm font-semibold text-indigo-900">ROOM / HALL NUMBER: ${rNo}</div>
+            <div class="text-sm font-semibold text-indigo-900">ROOM / HALL: ${esc(sess.RoomNo)}</div>
+            <div class="text-sm text-slate-700">${esc(fmtDate(sess.ExamDate))} &middot; ${sess.StartTime} - ${sess.EndTime}</div>
+            <div class="text-xs text-slate-600 mt-1">Modules: ${modLine}</div>
             <div class="text-xs text-slate-500 mt-1">[ FRONT OF ROOM: BLACKBOARD / INVIGILATOR DESK ]</div>
           </div>
-          ${tableHtml}
+          ${t}
           <div class="mt-6 flex justify-between text-xs text-slate-500 pt-3 border-t border-slate-200">
-            <span>Room Capacity: ${roomData.length}</span>
-            <span>Allocated Candidates: ${roomData.filter(m => m.RollNo !== '--- VACANT ---').length}</span>
+            <span>Room Capacity: ${sess.capacity}</span>
+            <span>Allocated Candidates: ${sess.candidates}</span>
             <span>Invigilator Signature: __________________</span>
-          </div>
-        `;
-
+          </div>`;
         preview.appendChild(card.cloneNode(true));
         printArea.appendChild(card);
       });
     }
 
     function formatPrintCell(cand) {
-      if (!cand || cand.RollNo === '--- VACANT ---') {
+      if (!cand || cand.Vacant) {
         return `<td class="border border-slate-300 p-1 text-slate-300 font-mono text-[10px]">VACANT</td>`;
       }
       return `
         <td class="border border-slate-300 p-1.5 font-semibold text-slate-900">
-          <div>${cand.RollNo}</div>
-          <div class="text-[9px] text-indigo-700 font-normal">${cand.SubjectCode}</div>
-        </td>
-      `;
+          <div>${esc(cand.RollNo)}</div>
+          <div class="text-[9px] text-indigo-700 font-normal">${esc(cand.SubjectCode)}</div>
+        </td>`;
     }
 
-    // --- CSV Downloaders ---
-    function downloadMasterCSV() {
-      if (!masterAllocation.length) return alert("Run allocation first.");
-      const csv = Papa.unparse(masterAllocation);
-      triggerDownload(csv, "master_exam_seating_allocation.csv");
-    }
-
-    function downloadSummaryCSV() {
-      if (!masterAllocation.length) return alert("Run allocation first.");
-      const grouped = {};
-      masterAllocation.filter(m => m.RollNo !== '--- VACANT ---').forEach(m => {
-        const key = `${m.RoomNo}_${m.SubjectCode}_${m.Program}`;
-        if (!grouped[key]) {
-          grouped[key] = { RoomNo: m.RoomNo, SubjectCode: m.SubjectCode, Program: m.Program, Count: 0, FirstRoll: m.RollNo, LastRoll: m.RollNo };
-        }
-        grouped[key].Count++;
-        grouped[key].LastRoll = m.RollNo;
+    // ---------- Reports by Exam Date ----------
+    function renderReportsTab() {
+      const tbody = document.getElementById('reportsBody');
+      tbody.innerHTML = '';
+      allDates().forEach(date => {
+        const ss = sessionsOnDate(date);
+        const mods = new Set(ss.flatMap(s => s.modules.map(m => m.code))).size;
+        const cands = ss.reduce((a, s) => a + s.candidates, 0);
+        const times = [...new Set(ss.map(s => `${s.StartTime}-${s.EndTime}`))].join(', ');
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-slate-50';
+        tr.innerHTML = `
+          <td class="p-2.5 font-bold">${esc(fmtDate(date))}</td>
+          <td class="p-2.5">${esc(times)}</td>
+          <td class="p-2.5 text-center">${ss.length}</td>
+          <td class="p-2.5 text-center">${mods}</td>
+          <td class="p-2.5 text-center font-bold">${cands}</td>
+          <td class="p-2.5 space-x-1 whitespace-nowrap">
+            <button data-act="xlsx" class="bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1 rounded font-semibold">Excel</button>
+            <button data-act="seat" class="bg-slate-700 hover:bg-slate-600 text-white px-2 py-1 rounded">Seating CSV</button>
+            <button data-act="sum" class="bg-slate-700 hover:bg-slate-600 text-white px-2 py-1 rounded">Summary CSV</button>
+            <button data-act="print" class="bg-indigo-700 hover:bg-indigo-600 text-white px-2 py-1 rounded">Print Door Charts</button>
+          </td>`;
+        tr.querySelector('[data-act="xlsx"]').onclick = () => downloadDateXLSX(date);
+        tr.querySelector('[data-act="seat"]').onclick = () => downloadDateSeatingCSV(date);
+        tr.querySelector('[data-act="sum"]').onclick = () => downloadDateSummaryCSV(date);
+        tr.querySelector('[data-act="print"]').onclick = () => printDate(date);
+        tbody.appendChild(tr);
       });
-      const rows = Object.values(grouped).map(g => ({
-        RoomNo: g.RoomNo,
-        SubjectCode: g.SubjectCode,
-        Program: g.Program,
-        CandidateCount: g.Count,
-        RollNoSpan: `${g.FirstRoll} to ${g.LastRoll}`
+    }
+
+    function seatingRowsForDate(date) {
+      const includeVacant = document.getElementById('includeVacant').checked;
+      const out = [];
+      sessionsOnDate(date).forEach(sess => {
+        seatsOf(sess).forEach(s => {
+          if (s.Vacant && !includeVacant) return;
+          out.push({
+            'Exam Date': s.ExamDate, 'Start Time': s.StartTime, 'End Time': s.EndTime, 'Room': s.RoomNo,
+            'Seat No': s.SeatNo, 'Bench Row': s.Row, 'Bench Col': s.Col, 'Side': s.Side,
+            'Roll No.': s.Vacant ? '--- VACANT ---' : s.RollNo,
+            'Student Number': s.StudentNumber, 'Student Name': s.CandidateName,
+            'Module Code': s.SubjectCode, 'Module Description': s.ModuleDescription
+          });
+        });
+      });
+      return out;
+    }
+
+    function summaryExportRows(date) {
+      return buildSummaryRows(date).map(g => ({
+        'Exam Date': g.ExamDate, 'Start Time': g.StartTime, 'End Time': g.EndTime, 'Room': g.RoomNo,
+        'Module Code': g.ModuleCode, 'Module Description': g.ModuleDescription,
+        'Candidates': g.CandidateCount, 'First Roll No.': g.FirstRoll, 'Last Roll No.': g.LastRoll,
+        'Room Capacity': g.RoomCapacity
       }));
-      triggerDownload(Papa.unparse(rows), "invigilation_packet_summary.csv");
     }
 
-    function downloadStudentTemplate() {
-      const csv = "RollNo,CandidateName,Program,SubjectCode\nBCOM-101,Sample Student 1,B.Com,MAFAR105\nBSC-201,Sample Student 2,B.Sc,MSCS103";
-      triggerDownload(csv, "template_students.csv");
+    function needAllocation() {
+      if (!masterAllocation.length) { alert('Generate the seating first.'); return true; }
+      return false;
     }
 
-    function downloadRoomTemplate() {
-      const csv = "RoomNo,BenchRows,BenchCols\n402,5,2\n403,5,2";
-      triggerDownload(csv, "template_rooms.csv");
+    function downloadDateSeatingCSV(date) {
+      if (needAllocation()) return;
+      triggerDownload(Papa.unparse(seatingRowsForDate(date)), `Seating_${date}.csv`);
     }
+    function downloadDateSummaryCSV(date) {
+      if (needAllocation()) return;
+      triggerDownload(Papa.unparse(summaryExportRows(date)), `Summary_${date}.csv`);
+    }
+    function addDateSheets(wb, date, suffix) {
+      const sumWs = XLSX.utils.json_to_sheet(summaryExportRows(date));
+      const seatWs = XLSX.utils.json_to_sheet(seatingRowsForDate(date));
+      sumWs['!cols'] = [12, 10, 10, 34, 12, 40, 11, 14, 14, 13].map(w => ({ wch: w }));
+      seatWs['!cols'] = [12, 10, 10, 34, 8, 10, 10, 8, 14, 16, 34, 12, 40].map(w => ({ wch: w }));
+      XLSX.utils.book_append_sheet(wb, sumWs, ('Summary' + suffix).slice(0, 31));
+      XLSX.utils.book_append_sheet(wb, seatWs, ('Seating' + suffix).slice(0, 31));
+    }
+    function downloadDateXLSX(date) {
+      if (needAllocation()) return;
+      const wb = XLSX.utils.book_new();
+      addDateSheets(wb, date, '');
+      XLSX.writeFile(wb, `Seating_Report_${date}.xlsx`);
+    }
+    function downloadAllDatesXLSX() {
+      if (needAllocation()) return;
+      const wb = XLSX.utils.book_new();
+      allDates().forEach(d => addDateSheets(wb, d, ' ' + d.slice(5)));
+      XLSX.writeFile(wb, 'Seating_Report_All_Dates.xlsx');
+    }
+    function printDate(date) {
+      currentDate = date;
+      document.getElementById('dateSelect').value = date;
+      refreshViews();
+      window.print();
+    }
+
+    // ---------- Legacy-style CSV exports ----------
+    function downloadMasterCSV() {
+      if (needAllocation()) return;
+      const rows = masterAllocation.map(s => ({
+        ExamDate: s.ExamDate, StartTime: s.StartTime, EndTime: s.EndTime, RoomNo: s.RoomNo,
+        SeatNo: s.SeatNo, Row: s.Row, Col: s.Col, Side: s.Side, DeskLabel: s.DeskLabel,
+        RollNo: s.Vacant ? '--- VACANT ---' : s.RollNo, StudentNumber: s.StudentNumber,
+        CandidateName: s.CandidateName, ModuleCode: s.SubjectCode, ModuleDescription: s.ModuleDescription
+      }));
+      triggerDownload(Papa.unparse(rows), 'master_exam_seating_allocation.csv');
+    }
+    function downloadSummaryCSV() { downloadDateSummaryCSV(currentDate); }
 
     function triggerDownload(content, filename) {
       const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement("a");
+      const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.setAttribute("download", filename);
+      link.setAttribute('download', filename);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
