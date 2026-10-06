@@ -17,7 +17,7 @@
        so the result is identical whatever "Margins" option the print dialog uses.
        ===================================================================== */
     @page { size: A4 portrait; margin: 0; }
-    :root { --page-h: 1116px; --pwd-gold: #856404; }
+    :root { --page-h: 1096px; --pwd-gold: #856404; }
 
     /* =====================================================================
        READABILITY LAYER (screen + print)
@@ -101,6 +101,9 @@
     .rpt-measure .rpt-card.fit > *, #printArea .rpt-card.fit > * { flex: none; }
     .rpt-measure .rpt-card.fit > .rpt-foot, .rpt-measure .rpt-card.fit > .rpt-sigs,
     #printArea .rpt-card.fit > .rpt-foot, #printArea .rpt-card.fit > .rpt-sigs { margin-top: auto; }
+    /* Measure with the same fonts that the printed PDF uses, so the fit-to-page maths matches the PDF exactly */
+    .rpt-measure, .rpt-measure * { font-family: 'Segoe UI', 'Helvetica Neue', Arial, 'Liberation Sans', sans-serif !important; }
+    .rpt-measure .rpt-serif { font-family: 'Times New Roman', Times, 'Liberation Serif', Georgia, serif !important; }
     .rpt-serif { font-family: Georgia, 'Times New Roman', Times, 'Liberation Serif', serif; }
     .rpt-blank { display: inline-block; border-bottom: 1.5px solid #334155; height: 1em; vertical-align: -2px; }
     .rpt-head { text-align: center; padding-bottom: 8px; border-bottom: 2px solid #1e293b; margin-bottom: 8px; }
@@ -173,6 +176,23 @@
     .rpt-card.dense { --roll-max: 16.5px; }
     .rpt-card.dense .rpt-cell-in { gap: 0; }
 
+    /* ---- Rooms with MORE THAN 6 bench columns only: cell text flows downwards and uses smaller type ---- */
+    .rpt-card.narrow-cols { --nw-scale: 1; }
+    .narrow-cols .rpt-table thead th { font-size: calc(11px * var(--nw-scale)); line-height: 1.15; padding: 3px 1px; }
+    .narrow-cols .rpt-table thead tr.rpt-subhead th { font-size: calc(10px * var(--nw-scale)); padding: 2px 1px; white-space: normal; }
+    .narrow-cols .rpt-table td.rpt-rowhead { font-size: calc(12px * var(--nw-scale)); }
+    .narrow-cols .rpt-cell { padding: 2px 1px !important; }
+    .narrow-cols .rpt-cell-in { gap: 1px; }
+    .narrow-cols .rpt-cell-top { flex-direction: column; align-items: center; gap: 0; white-space: normal; line-height: 1.1; }
+    .narrow-cols .rpt-dot { display: none; }
+    .narrow-cols .rpt-desk, .narrow-cols .rpt-blk { font-size: calc(var(--top-fs, 9px) * var(--nw-scale)); white-space: normal; overflow-wrap: anywhere; text-align: center; line-height: 1.1; }
+    .narrow-cols .print-roll-no { white-space: normal; flex-wrap: wrap; justify-content: center; align-items: center; gap: 1px 2px; overflow-wrap: anywhere; line-height: 1.05; letter-spacing: 0; }
+    .narrow-cols .rpt-sub { white-space: normal; overflow-wrap: anywhere; line-height: 1.1; font-size: calc(var(--sub-fs, 8px) * var(--nw-scale)); }
+    .narrow-cols .rpt-sub span { display: block; }
+    .narrow-cols .rpt-vacant-txt { font-size: calc(8px * var(--nw-scale)); letter-spacing: 0; white-space: normal; }
+    .narrow-cols .rpt-tag { font-size: calc(6.5px * var(--nw-scale)); padding: 0 2px; }
+    .narrow-cols .rpt-pwd { font-size: calc(7.5px * var(--nw-scale)); margin-left: 0; }
+
     .rpt-meta { font-size: 13.5px; line-height: 1.4; color: #0f172a; }
     .rpt-meta .row { display: flex; justify-content: space-between; gap: 14px; padding-top: 3px; }
     .rpt-meta .row:first-child { border-top: 1px solid #64748b; margin-top: 6px; padding-top: 5px; }
@@ -190,10 +210,6 @@
     .rpt-sign { text-align: center; font-size: 13px; color: #0f172a; }
     .rpt-sign .line { border-top: 1.5px solid #334155; padding-top: 3px; font-weight: 800; }
     .rpt-sign .role { font-size: 12px; font-weight: 600; color: #334155; }
-    .rpt-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; font-weight: 600; color: #1e293b; margin-top: 8px; }
-    .rpt-legend .sw-cancel { background: #e2e6eb; background-image: repeating-linear-gradient(135deg, rgba(71, 85, 105, .35) 0, rgba(71, 85, 105, .35) 1.2px, transparent 1.2px, transparent 4px); }
-    .rpt-legend .rpt-pwd { margin: 0 5px 0 0; font-size: 12px; }
-    .rpt-legend .sw { display: inline-block; width: 13px; height: 13px; border: 1.5px solid #475569; border-radius: 3px; vertical-align: -2px; margin-right: 5px; }
 
     /* =====================================================================
        PRINT / SAVE-AS-PDF
@@ -218,7 +234,7 @@
         box-sizing: border-box !important; margin: 0 auto !important;
         padding: 10mm 10mm 9mm !important;
         width: 100% !important; max-width: 210mm !important;
-        height: auto !important; overflow: hidden !important;
+        height: var(--page-h) !important; max-height: var(--page-h) !important; overflow: hidden !important;
         border-radius: 0 !important; box-shadow: none !important;
       }
       .page-break:last-child { page-break-after: auto; break-after: auto; }
@@ -1073,6 +1089,14 @@
       return [...map.values()];
     }
 
+    // One block = one unique Program + Academic Session (Semester) + Subject (Module Description) combination.
+    // (Used for block numbers only. Seating separation is by PROGRAM: students of one program never share a bench,
+    //  even when they sit different subjects.)
+    function blockKeyOf(s) {
+      const desc = String(s.ModuleDescription || '').replace(/\s+/g, ' ').trim().toUpperCase();
+      return `${s.ProgramName}||${cleanSemester(s.AcademicSession)}||${desc}`;
+    }
+
     function minBenchesFor(students) {
       const byProg = {};
       students.forEach(s => { byProg[s.ProgramName] = (byProg[s.ProgramName] || 0) + 1; });
@@ -1891,26 +1915,47 @@
 
     // ---------- Seat allocation engine with Serpentine Order & Front PWD Priority ----------
     function allocateSession(students, colRows, layoutOrSingle = false) {
-      const benches = [];
       const isChairUnit = (r, c) => {
         if (layoutOrSingle === true || layoutOrSingle === 'chair') return true;
         if (!layoutOrSingle || layoutOrSingle === 'bench') return false;
         return isUnitChair(layoutOrSingle, r, c, colRows.length);
       };
 
-      // Odd column: front to back (1 to n); Even column: back to front (n down to 1) Serpentine
-      colRows.forEach((n, ci) => {
-        const col = ci + 1;
-        if (col % 2 !== 0) {
-          for (let r = 1; r <= n; r++) benches.push({ r, c: col, isChair: isChairUnit(r, col) });
-        } else {
-          for (let r = n; r >= 1; r--) benches.push({ r, c: col, isChair: isChairUnit(r, col) });
-        }
-      });
+      // Serpentine seating order over the given per-column depths:
+      // odd column front to back (1 to n); even column back to front (n down to 1).
+      function serpentine(heights) {
+        const out = [];
+        heights.forEach((n, ci) => {
+          const col = ci + 1;
+          if (col % 2 !== 0) {
+            for (let r = 1; r <= n; r++) out.push({ r, c: col, isChair: isChairUnit(r, col) });
+          } else {
+            for (let r = n; r >= 1; r--) out.push({ r, c: col, isChair: isChairUnit(r, col) });
+          }
+        });
+        return out;
+      }
 
+      // FRONT-FIRST: when a room has spare capacity, only the first K units counted ROW BY ROW from the front
+      // (row 1 across every column, then row 2, ...) are used; the back rows stay vacant.
+      function frontHeights(K) {
+        const h = colRows.map(() => 0);
+        const maxRow = Math.max(0, ...colRows);
+        let left = K;
+        for (let r = 1; r <= maxRow && left > 0; r++) {
+          for (let ci = 0; ci < colRows.length && left > 0; ci++) {
+            if (r <= colRows[ci]) { h[ci] = r; left--; }
+          }
+        }
+        return h;
+      }
+
+      // Students of one PROGRAM never share a bench (even for different subjects / semesters).
       const names = [...new Set(students.map(s => s.ProgramName))].sort(natCompare);
 
-      function runWalk(level, sticky) {
+      // level 2 = PWD students keep at least one empty bench around them (also diagonally);
+      // level 1 = at least one empty bench in front / behind / beside them (no diagonal rule).
+      function runWalk(level, sticky, benches) {
         const q = {};
         const allPwd = [];
         names.forEach(p => {
@@ -1994,13 +2039,37 @@
         return { placements, unplaced, level, sticky };
       }
 
-      let best = null;
-      for (const [level, sticky] of [[2, true], [2, false], [1, true], [1, false]]) {
-        const res = runWalk(level, sticky);
-        if (!best || res.unplaced.length < best.unplaced.length) best = res;
+      const passes = [[2, true], [2, false], [1, true], [1, false]];
+      const fullBenches = serpentine(colRows);
+
+      // Pass 0: how many units does the whole room need? (lower bound for the front-first search)
+      let seed = null;
+      for (const [level, sticky] of passes) {
+        const res = runWalk(level, sticky, fullBenches);
+        if (!seed || res.unplaced.length < seed.unplaced.length) seed = res;
         if (!res.unplaced.length) break;
       }
-      best.benches = benches;
+      const usedUnits = seed.placements.filter(pl => pl.L || pl.R).length;
+
+      let best = null, activeBenches = fullBenches;
+      if (!seed.unplaced.length) {
+        // Use the smallest front block of rows that seats everybody (and honours the PWD gap rule at the
+        // strictest level possible); everything behind it is left vacant.
+        search:
+        for (const [level, sticky] of passes) {
+          for (let K = Math.max(1, usedUnits); K <= fullBenches.length; K++) {
+            const bl = serpentine(frontHeights(K));
+            const res = runWalk(level, sticky, bl);
+            if (!res.unplaced.length) { best = res; activeBenches = bl; break search; }
+          }
+        }
+      }
+      if (!best) { best = seed; activeBenches = fullBenches; }   // room too small: report what could not be seated
+
+      // Seat list = used front block (in serpentine order) followed by the vacant remainder of the room.
+      const activeSet = new Set(activeBenches.map(b => b.r + '-' + b.c));
+      const vacantRest = fullBenches.filter(b => !activeSet.has(b.r + '-' + b.c));
+      best.benches = activeBenches.concat(vacantRest);
       return best;
     }
 
@@ -2033,6 +2102,51 @@
         (slots[slotKey] = slots[slotKey] || []).push(r);
       });
 
+      // BLOCK NUMBERS are allocated per EXAM START TIME (date + start time), irrespective of end time, so that
+      // exams starting together never reuse a block number even when they finish at different times.
+      const startGroups = {};
+      scheduleRows.forEach(r => {
+        const sk = `${r.ExamDate}|${r.StartTime}`;
+        (startGroups[sk] = startGroups[sk] || []).push(r);
+      });
+      const progSemOf = s => `${s.ProgramName}||${cleanSemester(s.AcademicSession)}`;
+      const gKeyOf = blockKeyOf;                       // block identity = Program + Semester + Subject
+      const startBlockMaps = {};
+      Object.keys(startGroups).forEach(sk => {
+        const gRoomMap = {};
+        startGroups[sk].forEach(r => { (gRoomMap[r.Room] = gRoomMap[r.Room] || []).push(r); });
+        const gRooms = Object.keys(gRoomMap).sort(natCompare);
+        const blockMap = {};
+        const gStudents = {};
+        const groupInfo = {};
+        gRooms.forEach(room => {
+          blockMap[room] = {};
+          gStudents[room] = dedupeStudents(gRoomMap[room]);
+          gStudents[room].forEach(s => {
+            const pk = progSemOf(s);
+            if (!groupInfo[pk]) groupInfo[pk] = { prog: s.ProgramName, sem: romanToInt(semRoman(s.AcademicSession)) };
+          });
+        });
+        // One running number across everything that starts at this time, grouped by Program + Semester
+        // (e.g. BAMMC Sem V = Blocks 1-4 in Rooms 7-10, then BMS Sem V = Blocks 5-8, and so on).
+        // If one room holds several SUBJECTS of the same Program + Semester, each subject gets its own block number.
+        let blockCounter = 1;
+        Object.keys(groupInfo)
+          .sort((a, b) => natCompare(groupInfo[a].prog, groupInfo[b].prog) || (groupInfo[a].sem - groupInfo[b].sem) || natCompare(a, b))
+          .forEach(pk => {
+            gRooms.forEach(room => {
+              const inGroup = gStudents[room].filter(s => progSemOf(s) === pk);
+              const subjKeys = [...new Set(inGroup.map(gKeyOf))].sort(natCompare);
+              subjKeys.forEach(gk => {
+                const blkNumStr = blockStyle === 'arabic' ? String(blockCounter) : toRoman(blockCounter);
+                blockMap[room][gk] = { label: 'Block ' + blkNumStr, num: blkNumStr, seq: blockCounter };
+                blockCounter++;
+              });
+            });
+          });
+        startBlockMaps[sk] = blockMap;
+      });
+
       const sortedSlotKeys = Object.keys(slots).sort();
 
       sortedSlotKeys.forEach(slotKey => {
@@ -2042,31 +2156,10 @@
         
         const sortedRooms = Object.keys(roomMap).sort(natCompare);
 
-        // BLOCK NUMBERING: one running number across the whole slot, grouped by Program + Semester.
-        // e.g. BAMMC Sem V = Blocks 1-4 (Rooms 7-10), then BMS Sem V = Blocks 5-8, and so on.
-        const gKeyOf = s => `${s.ProgramName}||${cleanSemester(s.AcademicSession)}`;
-        const slotBlockMap = {};
+        // Block numbers come from the start-time group computed above (shared by all end times).
+        const slotBlockMap = startBlockMaps[`${slotRows[0].ExamDate}|${slotRows[0].StartTime}`] || {};
         const roomStudentsMap = {};
-        const groupInfo = {};
-        sortedRooms.forEach(room => {
-          slotBlockMap[room] = {};
-          roomStudentsMap[room] = dedupeStudents(roomMap[room]);
-          roomStudentsMap[room].forEach(s => {
-            const gk = gKeyOf(s);
-            if (!groupInfo[gk]) groupInfo[gk] = { prog: s.ProgramName, sem: romanToInt(semRoman(s.AcademicSession)) };
-          });
-        });
-        let blockCounter = 1;
-        Object.keys(groupInfo)
-          .sort((a, b) => natCompare(groupInfo[a].prog, groupInfo[b].prog) || (groupInfo[a].sem - groupInfo[b].sem) || natCompare(a, b))
-          .forEach(gk => {
-            sortedRooms.forEach(room => {
-              if (!roomStudentsMap[room].some(s => gKeyOf(s) === gk)) return;
-              const blkNumStr = blockStyle === 'arabic' ? String(blockCounter) : toRoman(blockCounter);
-              slotBlockMap[room][gk] = { label: 'Block ' + blkNumStr, num: blkNumStr, seq: blockCounter };
-              blockCounter++;
-            });
-          });
+        sortedRooms.forEach(room => { roomStudentsMap[room] = dedupeStudents(roomMap[room]); });
 
         sortedRooms.forEach(room => {
           const list = roomMap[room];
@@ -2568,7 +2661,7 @@
     // A4 = 210 x 297 mm = ~794 x 1123 px. Pages carry 10mm side/top and 9mm bottom margins,
     // so the printable content is 718px wide, and a report card may be at most PAGE_H_PX tall.
     const PRINT_W = 718;
-    const PAGE_H_PX = 1116;
+    const PAGE_H_PX = 1096; // keep in sync with --page-h (leaves a safety gap below the A4 height of ~1123px)
 
     // Puts a card into an off-screen host at the real A4 geometry and returns a callback-friendly measure.
     function withMeasureHost(card, fn) {
@@ -2596,6 +2689,15 @@
         };
         let best = search();
         if (best < 54 && !card.classList.contains('dense')) { card.classList.add('dense'); best = search(); }
+        // Rooms with more than 6 bench columns: shrink the (wrapped) cell text step by step until the page fits
+        if (card.classList.contains('narrow-cols')) {
+          let sc = 1;
+          while (card.offsetHeight > PAGE_H_PX && sc > 0.56) {
+            sc -= 0.06;
+            card.style.setProperty('--nw-scale', sc.toFixed(2));
+            best = search();
+          }
+        }
         return best;
       });
     }
@@ -2615,10 +2717,10 @@
     }
 
     // Largest roll-number font (px) that keeps roll + PWD + status pill on one line inside a cell of cellPx width
-    function rollFontPx(roll, hasPwd, statusLen, cellPx, hi) {
+    function rollFontPx(roll, hasPwd, statusLen, cellPx, hi, lo) {
       const extras = (hasPwd ? 26 : 0) + (statusLen ? statusLen * 6.6 + 12 : 0) + ((hasPwd || statusLen) ? 4 : 0);
       const fs = Math.floor((cellPx - 11 - extras) / (Math.max(3, String(roll).length) * 0.68) * 10) / 10;
-      return Math.max(12.5, Math.min(hi, fs));
+      return Math.max(lo || 12.5, Math.min(hi, fs));
     }
     const pwdWord = (extraStyle) => `<span class="rpt-pwd" style="margin-left:0;${extraStyle || ''}">PWD</span>`;
     const blankLine = w => `<span class="rpt-blank" style="width:${w}px"></span>`;
@@ -2630,16 +2732,6 @@
         <div class="rpt-trust rpt-serif">Shri Vile Parle Kelavani Mandal's</div>
         <div class="rpt-college rpt-serif${isLongCollege() ? ' long' : ''}">${esc(selectedCollege || 'EXAMINATION CENTRE')}</div>
         <div class="rpt-title">${title}</div>`;
-    }
-
-    // Legend: status markers only. Gender fill colours are self-explanatory and are not listed.
-    function reportLegendHtml() {
-      return `<div class="rpt-legend">
-        <span><i class="sw" style="background:#c82333"></i>Debarred</span>
-        <span><i class="sw sw-cancel"></i>Admission Cancelled</span>
-        <span><b class="rpt-pwd">PWD</b>Person with Disability</span>
-        <span><i class="sw" style="background:#f1f5f9"></i>Vacant</span>
-      </div>`;
     }
 
     // Consolidated Notice Board Door Plan
@@ -2790,7 +2882,12 @@
       const blkShort = deskPx < 105;
       const subLen = Math.max(10, ...occ.map(d => (progShort(d.ProgramName) + ' \u00b7 ' + d.SubjectCode).length));
       const topLen = Math.max(8, ...occ.map(d => d.DeskLabel.length + 3 + (blkShort ? 4 : 6) + String(d.BlockNum).length));
-      const fitFs = (len, hi) => Math.max(8, Math.min(hi, Math.floor((deskPx - 10) / (len * 0.64) * 10) / 10));
+      const fitFs = (len, hi) => Math.max(7, Math.min(hi, Math.floor((deskPx - 9) / (len * 0.63) * 10) / 10));
+
+      // Rooms with MORE THAN 6 bench columns have very narrow cells: text flows down inside the cell and shrinks.
+      const narrow = colTypes.filter(t => t !== 'chair').length > 6;
+      const nwFs = (len, lo, hi) => Math.max(lo, Math.min(hi, Math.floor((deskPx - 6) / (Math.max(3, len) * 0.62) * 10) / 10));
+      const nwTokLen = Math.max(4, ...occ.flatMap(d => [progShort(d.ProgramName).length, ...String(d.SubjectCode).split(', ').map(x => x.length)]));
 
       let t = `<table class="rpt-table" style="table-layout: fixed; width: 100%;">`;
       t += `<colgroup><col style="width: 44px;">`;
@@ -2830,10 +2927,10 @@
               t += `<td class="rpt-empty desk-cell-fixed ${doubleBorderClass}">&mdash;</td>`;
             }
           } else if (isColChair) {
-            t += formatPrintCell(gridMap[`${r}-${c}-Seat`], deskWidthStyle, !isLastBenchCol, blkShort, deskPx);
+            t += formatPrintCell(gridMap[`${r}-${c}-Seat`], deskWidthStyle, !isLastBenchCol, blkShort, deskPx, narrow);
           } else {
-            t += formatPrintCell(gridMap[`${r}-${c}-Left`], deskWidthStyle, false, blkShort, deskPx);
-            t += formatPrintCell(gridMap[`${r}-${c}-Right`], deskWidthStyle, !isLastBenchCol, blkShort, deskPx);
+            t += formatPrintCell(gridMap[`${r}-${c}-Left`], deskWidthStyle, false, blkShort, deskPx, narrow);
+            t += formatPrintCell(gridMap[`${r}-${c}-Right`], deskWidthStyle, !isLastBenchCol, blkShort, deskPx, narrow);
           }
         });
         t += `</tr>`;
@@ -2857,8 +2954,9 @@
       const card = document.createElement('div');
       card.className = 'rpt-card page-break fit';
       card.style.setProperty('--desk-h', '60px');
-      card.style.setProperty('--sub-fs', fitFs(subLen, 12) + 'px');
-      card.style.setProperty('--top-fs', fitFs(topLen, 12) + 'px');
+      card.style.setProperty('--sub-fs', (narrow ? nwFs(nwTokLen, 6, 9) : fitFs(subLen, 12)) + 'px');
+      card.style.setProperty('--top-fs', (narrow ? nwFs(Math.max(7, topLen - 4), 6, 9) : fitFs(topLen, 12)) + 'px');
+      if (narrow) card.classList.add('narrow-cols');
       card.innerHTML = `
         <div class="rpt-head" style="border-bottom-width:1px;padding-bottom:5px;margin-bottom:6px">
           ${reportHeaderHtml('ROOM SEATING PLAN &amp; DOOR NOTICE')}
@@ -2873,7 +2971,6 @@
           <div class="rpt-front" style="margin-top:5px">[ Front of Room: Blackboard / Invigilator Desk ]</div>
         </div>
         ${t}
-        ${reportLegendHtml()}
         <div class="rpt-foot" style="padding-top:8px;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:10px 18px">
           <span style="flex:1 1 380px">${seatingLabel} &middot; <b>Candidates:</b> ${sess.candidates} (Male: ${sess.male}, Female: ${sess.female})${sess.pwd ? ' (' + pwdWord() + ': ' + sess.pwd + ')' : ''}</span>
           <span style="white-space:nowrap;margin-left:auto"><b>Junior Supervisor Signature:</b> ${blankLine(170)}</span>
@@ -2893,6 +2990,7 @@
       const rollW = `${((100 - rowHeadPct) * 0.62 / numCols).toFixed(3)}%`;
       const snoW = `${((100 - rowHeadPct) * 0.38 / numCols).toFixed(3)}%`;
       const rollPx = Math.floor((PRINT_W - 44) * 0.62 / numCols);
+      const narrow = colTypes.filter(t => t !== 'chair').length > 6;   // more than 6 bench columns
       const hdrTxt = `${progShort(blk.program)} Roll No.`;
       const hdrFs = Math.max(8.5, Math.min(12.5, Math.floor((rollPx - 8) / (hdrTxt.length * 0.62) * 10) / 10));
 
@@ -2942,12 +3040,14 @@
               const bgStyle = special ? '' : `background-color: ${genderColors ? (isFem ? '#f3e8ff' : '#ccfbf1') : '#ffffff'} !important;`;
               const badge = isCanc ? '<span class="rpt-tag cancel">Cancel</span>' : (isDeb ? '<span class="rpt-tag debar">Debarred</span>' : '');
               const pwdBadge = cand.IsPWD ? '<span class="rpt-pwd">PWD</span>' : '';
-              const rfs = rollFontPx(cand.RollNo, !!cand.IsPWD, isCanc ? 6 : (isDeb ? 8 : 0), rollPx, 20);
+              const rfs = narrow ? rollFontPx(cand.RollNo, false, 0, rollPx, 15, 7)
+                                 : rollFontPx(cand.RollNo, !!cand.IsPWD, isCanc ? 6 : (isDeb ? 8 : 0), rollPx, 20);
+              const rollFsCss = narrow ? `calc(${rfs}px * var(--nw-scale, 1))` : `min(var(--roll-max, 20px), ${rfs}px)`;
 
               t += `<td class="rpt-cell desk-cell-fixed ${special}" style="${bgStyle}">
                 <div class="rpt-cell-in center">
                   <span class="rpt-desk">${esc(cand.DeskLabel)}</span>
-                  <span class="print-roll-no" style="font-size:min(var(--roll-max, 20px), ${rfs}px)">${esc(cand.RollNo)}${pwdBadge}${badge}</span>
+                  <span class="print-roll-no" style="font-size:${rollFsCss}">${esc(cand.RollNo)}${pwdBadge}${badge}</span>
                 </div>
               </td>`;
               t += `<td class="desk-cell-fixed ${doubleBorderClass}" style="background:#fff"></td>`;
@@ -2965,6 +3065,7 @@
       card.className = 'rpt-card page-break fit';
       card.style.setProperty('--desk-h', '50px');
       card.style.setProperty('--roll-max', '20px');
+      if (narrow) { card.classList.add('narrow-cols'); card.style.setProperty('--top-fs', '9.5px'); }
       card.innerHTML = `
         <!-- Top Institutional Header & Block Identification -->
         <div style="padding-bottom:6px;border-bottom:2px solid #1e293b;margin-bottom:8px">
@@ -3011,7 +3112,6 @@
 
         <!-- Seating Grid -->
         ${t}
-        ${reportLegendHtml()}
 
         <!-- Supervisor Verification & Accounting Footer -->
         <div class="rpt-foot">
@@ -3035,7 +3135,7 @@
       return card;
     }
 
-    function formatPrintCell(cand, deskWidthStyle, applyDoubleBorder, blkShort, cellPx) {
+    function formatPrintCell(cand, deskWidthStyle, applyDoubleBorder, blkShort, cellPx, narrow) {
       const doubleClass = applyDoubleBorder ? 'bench-col-border' : '';
       if (!cand || cand.Vacant) {
         return `<td class="rpt-cell rpt-vacant desk-cell-fixed ${doubleClass}" style="${deskWidthStyle}">
@@ -3058,7 +3158,12 @@
       const bgStyle = special ? '' : `background-color: ${genderColors ? (isFemale ? '#f3e8ff' : '#ccfbf1') : '#ffffff'} !important;`;
       const statusRemark = isCancelled ? '<span class="rpt-tag cancel">Cancel</span>' : (isDebarred ? '<span class="rpt-tag debar">Debarred</span>' : '');
       const pwdBadge = isPWDVal ? '<span class="rpt-pwd">PWD</span>' : '';
-      const rfs = rollFontPx(cand.RollNo, isPWDVal, isCancelled ? 6 : (isDebarred ? 8 : 0), cellPx || 100, 19);
+      const rfs = narrow ? rollFontPx(cand.RollNo, false, 0, cellPx || 42, 15, 7)
+                         : rollFontPx(cand.RollNo, isPWDVal, isCancelled ? 6 : (isDebarred ? 8 : 0), cellPx || 100, 19);
+      const rollFsCss = narrow ? `calc(${rfs}px * var(--nw-scale, 1))` : `min(var(--roll-max, 19px), ${rfs}px)`;
+      const subHtml = narrow
+        ? `<span>${esc(progShort(cand.ProgramName))}</span><span>${esc(cand.SubjectCode)}</span>`
+        : `${esc(progShort(cand.ProgramName))} &middot; ${esc(cand.SubjectCode)}`;
 
       return `
         <td class="rpt-cell desk-cell-fixed ${doubleClass} ${special}" style="${deskWidthStyle} ${bgStyle}">
@@ -3068,8 +3173,8 @@
               <span class="rpt-dot">&middot;</span>
               <span class="rpt-blk">${blkShort ? 'Blk' : 'Block'} ${esc(cand.BlockNum)}</span>
             </div>
-            <div class="print-roll-no" style="font-size:min(var(--roll-max, 19px), ${rfs}px)">${esc(cand.RollNo)}${pwdBadge}${statusRemark}</div>
-            <div class="rpt-sub">${esc(progShort(cand.ProgramName))} &middot; ${esc(cand.SubjectCode)}</div>
+            <div class="print-roll-no" style="font-size:${rollFsCss}">${esc(cand.RollNo)}${pwdBadge}${statusRemark}</div>
+            <div class="rpt-sub">${subHtml}</div>
           </div>
         </td>`;
     }
