@@ -176,7 +176,7 @@
     .rpt-card.dense { --roll-max: 16.5px; }
     .rpt-card.dense .rpt-cell-in { gap: 0; }
 
-    /* ---- Rooms with MORE THAN 6 bench columns only: cell text flows downwards and uses smaller type ---- */
+    /* ---- Rooms with MORE THAN 4 bench columns only: cell text flows downwards and uses smaller type ---- */
     .rpt-card.narrow-cols { --nw-scale: 1; }
     .narrow-cols .rpt-table thead th { font-size: calc(11px * var(--nw-scale)); line-height: 1.15; padding: 3px 1px; }
     .narrow-cols .rpt-table thead tr.rpt-subhead th { font-size: calc(10px * var(--nw-scale)); padding: 2px 1px; white-space: normal; }
@@ -260,6 +260,9 @@
       <div class="flex items-center space-x-2 mt-2 sm:mt-0">
         <button id="loadDemoBtn" class="bg-indigo-800 hover:bg-indigo-700 text-xs px-3 py-1.5 rounded font-medium border border-indigo-400 transition shadow-sm">
           Load Sample Demo Data
+        </button>
+        <button id="clearAllDataBtn" title="Remove the uploaded Exam Schedule and everything generated from it" class="bg-rose-700 hover:bg-rose-600 text-white text-xs px-3 py-1.5 rounded font-medium border border-rose-300 transition shadow-sm">
+          Clear All Data
         </button>
       </div>
     </div>
@@ -510,6 +513,21 @@
           </div>
         </div>
 
+        <!-- Seating treatment of Cancelled / Debarred students -->
+        <div class="mb-4 p-3.5 border border-slate-300 rounded bg-white">
+          <div class="text-xs sm:text-sm font-bold text-slate-900 mb-2">Seating treatment of Admission Cancelled &amp; Debarred students</div>
+          <div class="flex flex-col md:flex-row md:items-start gap-2 md:gap-6 text-xs sm:text-sm text-slate-800">
+            <label class="flex items-start gap-2 cursor-pointer">
+              <input type="radio" name="specialSeatMode" value="show" checked class="mt-0.5"/>
+              <span><b>Display in seating</b> &ndash; keep them on the seating plan with the existing highlighted formatting.</span>
+            </label>
+            <label class="flex items-start gap-2 cursor-pointer">
+              <input type="radio" name="specialSeatMode" value="exclude" class="mt-0.5"/>
+              <span><b>Exclude from seating</b> &ndash; omit them from Door Plans, Room Notices, Supervisor Reports and all seating outputs (their room &amp; block details stay in the table below).</span>
+            </label>
+          </div>
+        </div>
+
         <!-- Inputs -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="border border-slate-300 rounded p-4 bg-slate-50">
@@ -560,6 +578,7 @@
                   <th class="p-2.5 border border-slate-300">Student Name</th>
                   <th class="p-2.5 border border-slate-300 text-center">Gender</th>
                   <th class="p-2.5 border border-slate-300">Program Name</th>
+                  <th class="p-2.5 border border-slate-300">Exam Date &amp; Time</th>
                   <th class="p-2.5 border border-slate-300">Room</th>
                   <th class="p-2.5 border border-slate-300 text-center">Block</th>
                   <th class="p-2.5 border border-slate-300 text-center">Status</th>
@@ -568,7 +587,7 @@
               </thead>
               <tbody id="matchedStatusBody" class="divide-y divide-slate-200">
                 <tr>
-                  <td colspan="10" class="p-4 text-center text-slate-400">No cancelled or debarred students currently matched.</td>
+                  <td colspan="11" class="p-4 text-center text-slate-400">No cancelled or debarred students currently matched.</td>
                 </tr>
               </tbody>
             </table>
@@ -733,11 +752,14 @@
     let selectedCollege = '';
     let currentDoorView = 'both';
 
+    let excludeSpecialStatus = false;      // true = Cancelled / Debarred students are left out of all seating outputs
+    let studentBlockIndex = {};            // 'date|start|end|room|roll' -> block label (kept for EVERY candidate, seated or not)
     let cancelledStudentIds = new Set();
     let debarredStudentIds = new Set();
 
     const LAYOUT_KEY = 'examSeatingRoomLayouts_v7';
     const COLLEGE_KEY = 'examSeatingCollege_v7';
+    const SPECIAL_SEAT_MODE_KEY = 'examSpecialSeatMode_v1';
     const STATUS_CANCELLED_KEY = 'examStatusCancelled_v7';
     const STATUS_DEBARRED_KEY = 'examStatusDebarred_v7';
     const BLOCK_STYLE_KEY = 'examBlockStyle_v8'; // v8: English numerals are now the default
@@ -920,6 +942,24 @@
       } catch (e) {}
     }
     loadSavedStatuses();
+
+    function setSpecialSeatMode(mode, persist) {
+      excludeSpecialStatus = (mode === 'exclude');
+      if (persist) { try { localStorage.setItem(SPECIAL_SEAT_MODE_KEY, excludeSpecialStatus ? 'exclude' : 'show'); } catch (e) {} }
+      document.querySelectorAll('input[name="specialSeatMode"]').forEach(r => { r.checked = (r.value === (excludeSpecialStatus ? 'exclude' : 'show')); });
+    }
+    try { setSpecialSeatMode(localStorage.getItem(SPECIAL_SEAT_MODE_KEY) || 'show', false); } catch (e) {}
+    document.querySelectorAll('input[name="specialSeatMode"]').forEach(r => r.addEventListener('change', () => {
+      if (!r.checked) return;
+      setSpecialSeatMode(r.value, true);
+      if (scheduleRows.length) {
+        recomputeRoomStats();
+        renderRoomSetup();
+        updateOverview();
+        if (masterAllocation.length) executeAllocation(true);   // re-seat without / with the special-status candidates
+      }
+      refreshStatusTable();
+    }));
 
     // ---------- Tab Switching ----------
     function switchTab(tabId) {
@@ -1104,6 +1144,22 @@
       return Math.max(maxProg, Math.ceil(students.length / 2));
     }
 
+    // Room capacity needs; candidates who are excluded from seating (Cancelled / Debarred) are not counted.
+    function recomputeRoomStats() {
+      roomStats = {};
+      const bySession = {};
+      scheduleRows.forEach(r => { (bySession[sessionKey(r)] = bySession[sessionKey(r)] || []).push(r); });
+      Object.values(bySession).forEach(list => {
+        const room = list[0].Room;
+        let studs = dedupeStudents(list);
+        if (excludeSpecialStatus) studs = studs.filter(s => !s.IsCancelled && !s.IsDebarred);
+        if (!roomStats[room]) roomStats[room] = { sessions: 0, peak: 0, minBenches: 0 };
+        roomStats[room].sessions++;
+        roomStats[room].peak = Math.max(roomStats[room].peak, studs.length);
+        roomStats[room].minBenches = Math.max(roomStats[room].minBenches, minBenchesFor(studs));
+      });
+    }
+
     function loadSchedule(rows) {
       scheduleRows = rows;
       masterAllocation = [];
@@ -1111,16 +1167,7 @@
       allocWarnings = [];
       roomStats = {};
       globalPrograms = [...new Set(rows.map(r => r.ProgramName))].sort(natCompare);
-      const bySession = {};
-      rows.forEach(r => { (bySession[sessionKey(r)] = bySession[sessionKey(r)] || []).push(r); });
-      Object.values(bySession).forEach(list => {
-        const room = list[0].Room;
-        const studs = dedupeStudents(list);
-        if (!roomStats[room]) roomStats[room] = { sessions: 0, peak: 0, minBenches: 0 };
-        roomStats[room].sessions++;
-        roomStats[room].peak = Math.max(roomStats[room].peak, studs.length);
-        roomStats[room].minBenches = Math.max(roomStats[room].minBenches, minBenchesFor(studs));
-      });
+      recomputeRoomStats();
       if (!selectedCollege) {
         const guess = detectCollege(Object.keys(roomStats));
         if (guess) {
@@ -1736,7 +1783,11 @@
         r.IsDebarred = st.isDebarred;
       });
 
-      if (masterAllocation.length) {
+      if (excludeSpecialStatus) {
+        // Excluded mode: the seating itself changes, so recompute capacity needs and re-seat
+        if (scheduleRows.length) { recomputeRoomStats(); renderRoomSetup(); updateOverview(); }
+        if (masterAllocation.length) executeAllocation(true);
+      } else if (masterAllocation.length) {
         masterAllocation.forEach(seat => {
           if (!seat.Vacant) {
             const st = getStudentStatusInfo(seat);
@@ -1797,31 +1848,46 @@
       document.getElementById('debarredListBadge').innerText = `${debarredStudentIds.size} IDs`;
 
       if (!matched.length) {
-        tbody.innerHTML = `<tr><td colspan="10" class="p-4 text-center text-slate-400 font-medium">No cancelled or debarred students currently matched with the schedule.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="11" class="p-4 text-center text-slate-400 font-medium">No cancelled or debarred students currently matched with the schedule.</td></tr>`;
         return;
       }
 
+      // One row per student per exam day / room, so the complete allocation of every matched student is visible
+      const seenKeys = new Set();
+      const detailRows = [];
+      scheduleRows.filter(r => r.IsCancelled || r.IsDebarred).forEach(r => {
+        const k = `${r.RollNo}|${r.StudentNumber}|${r.ExamDate}|${r.StartTime}|${r.EndTime}|${r.Room}`;
+        if (seenKeys.has(k)) return;
+        seenKeys.add(k);
+        detailRows.push(r);
+      });
+      detailRows.sort((a, b) => natCompare(a.RollNo, b.RollNo) || String(a.ExamDate).localeCompare(String(b.ExamDate)) || String(a.StartTime).localeCompare(String(b.StartTime)));
+      const srOf = {};
+      let srCounter = 0;
+      detailRows.forEach(r => { const id = r.RollNo + '|' + r.StudentNumber; if (!srOf[id]) srOf[id] = ++srCounter; });
+
       let html = '';
-      matched.sort((a, b) => natCompare(a.RollNo, b.RollNo)).forEach((s, idx) => {
+      detailRows.forEach(s => {
         const idToRemove = normId(s.StudentNumber) || normId(s.RollNo);
         const statusBadge = s.IsCancelled 
           ? `<span class="bg-[#334155] text-white px-2 py-0.5 rounded text-xs font-bold border border-slate-700">Admission Cancelled</span>`
           : `<span class="bg-[#c82333] text-white px-2 py-0.5 rounded text-xs font-bold border border-red-800">Debarred</span>`;
+        const exclNote = excludeSpecialStatus ? `<div class="text-[11px] text-slate-600 font-semibold mt-0.5">Excluded from seating</div>` : '';
 
-        const allocatedSeat = masterAllocation.find(m => m.RollNo === s.RollNo);
-        const blk = allocatedSeat ? allocatedSeat.Block : '-';
+        const blk = studentBlockIndex[`${s.ExamDate}|${s.StartTime}|${s.EndTime}|${s.Room}|${s.RollNo}`] || '-';
 
         html += `
           <tr class="hover:bg-slate-50 ${s.IsCancelled ? 'bg-slate-200' : ''}">
-            <td class="p-2.5 border border-slate-300 text-center font-medium">${idx + 1}</td>
+            <td class="p-2.5 border border-slate-300 text-center font-medium">${srOf[s.RollNo + '|' + s.StudentNumber]}</td>
             <td class="p-2.5 border border-slate-300 font-mono font-medium">${esc(s.StudentNumber || 'N/A')}</td>
             <td class="p-2.5 border border-slate-300 font-mono font-bold text-slate-900">${esc(s.RollNo)}</td>
             <td class="p-2.5 border border-slate-300 font-medium text-slate-900">${esc(s.StudentName)}</td>
             <td class="p-2.5 border border-slate-300 text-center font-semibold">${s.IsFemale ? '<span class="text-purple-700 font-bold">Female</span>' : '<span class="text-teal-700 font-bold">Male</span>'}</td>
             <td class="p-2.5 border border-slate-300">${esc(s.ProgramName)}</td>
+            <td class="p-2.5 border border-slate-300 whitespace-nowrap font-medium">${esc(fmtDate(s.ExamDate))}<br><span class="text-slate-600 text-xs">${esc(s.StartTime)} - ${esc(s.EndTime)}</span></td>
             <td class="p-2.5 border border-slate-300 font-semibold">${esc(s.Room)}</td>
             <td class="p-2.5 border border-slate-300 text-center font-bold text-indigo-900">${esc(blk)}</td>
-            <td class="p-2.5 border border-slate-300 text-center">${statusBadge}</td>
+            <td class="p-2.5 border border-slate-300 text-center">${statusBadge}${exclNote}</td>
             <td class="p-2.5 border border-slate-300 text-center">
               <button onclick="removeSingleStatus('${esc(idToRemove)}')" class="text-red-600 hover:text-red-800 font-bold underline">Remove</button>
             </td>
@@ -1877,6 +1943,30 @@
       document.getElementById('debarredInput').value = dSample.join('\n');
       applyStudentStatuses(true);
     }
+
+    // ---------- Clear All Data ----------
+    function clearAllScheduleData() {
+      if (!scheduleRows.length && !masterAllocation.length) { alert('There is no uploaded Exam Schedule data to clear.'); return; }
+      if (!confirm('Clear all uploaded Exam Schedule data and everything generated from it (seating, door plans, notices, reports)?\n\nRoom layouts, the selected college and the Cancelled / Debarred lists are kept.')) return;
+      scheduleRows = [];
+      masterAllocation = [];
+      sessionsMeta = [];
+      allocWarnings = [];
+      roomStats = {};
+      globalPrograms = [];
+      studentBlockIndex = {};
+      currentDate = '';
+      document.getElementById('scheduleFileInput').value = '';
+      document.getElementById('scheduleStatus').innerText = '';
+      document.getElementById('roomSetupCard').classList.add('hidden');
+      populateDateDropdown();
+      refreshViews();
+      refreshStatusTable();
+      renderReportsTab();
+      updateOverview();
+      switchTab('uploadTab');
+    }
+    document.getElementById('clearAllDataBtn').addEventListener('click', clearAllScheduleData);
 
     // ---------- Demo Data ----------
     document.getElementById('loadDemoBtn').addEventListener('click', function () {
@@ -2075,7 +2165,7 @@
 
     document.getElementById('runAllocationBtn').addEventListener('click', executeAllocation);
 
-    function executeAllocation() {
+    function executeAllocation(stay) {
       if (!scheduleRows.length) return alert('Please upload the exam schedule first.');
       if (!selectedCollege) return alert('Please select the college first.');
 
@@ -2093,6 +2183,7 @@
       masterAllocation = [];
       sessionsMeta = [];
       allocWarnings = [];
+      studentBlockIndex = {};
 
       const blockStyle = document.getElementById('blockNumberingSelect')?.value || 'arabic';
 
@@ -2165,16 +2256,22 @@
           const list = roomMap[room];
           const { ExamDate, StartTime, EndTime, Room } = list[0];
           const colRows = getColRows(roomLayouts[Room]);
-          const students = roomStudentsMap[Room];
+          const allStudents = roomStudentsMap[Room];
 
-          students.forEach(s => {
+          // Every candidate (including Cancelled / Debarred) gets his / her block, so the Matched Special Status table is complete
+          allStudents.forEach(s => {
             const defaultLabel = blockStyle === 'arabic' ? 'Block 1' : 'Block I';
             const defaultNum = blockStyle === 'arabic' ? '1' : 'I';
             const blkInfo = slotBlockMap[Room]?.[gKeyOf(s)] || { label: defaultLabel, num: defaultNum, seq: 1 };
             s.Block = blkInfo.label;
             s.BlockNum = blkInfo.num;
             s.BlockSeq = blkInfo.seq;
+            studentBlockIndex[`${ExamDate}|${StartTime}|${EndTime}|${Room}|${s.RollNo}`] = s.Block;
           });
+
+          // Candidates actually seated: Cancelled / Debarred are left out when the "Exclude from seating" option is on
+          const students = excludeSpecialStatus ? allStudents.filter(s => !s.IsCancelled && !s.IsDebarred) : allStudents;
+          if (excludeSpecialStatus && !students.length) return;   // nobody left to seat in this room / session
 
           const lay = roomLayouts[Room];
           const layType = layoutType(lay);
@@ -2309,7 +2406,7 @@
       refreshViews();
       refreshStatusTable();
       renderReportsTab();
-      switchTab('doorChartTab');
+      if (stay !== true) switchTab('doorChartTab');
     }
 
     // ---------- Date filter ----------
@@ -2689,7 +2786,7 @@
         };
         let best = search();
         if (best < 54 && !card.classList.contains('dense')) { card.classList.add('dense'); best = search(); }
-        // Rooms with more than 6 bench columns: shrink the (wrapped) cell text step by step until the page fits
+        // Rooms with more than 4 bench columns: shrink the (wrapped) cell text step by step until the page fits
         if (card.classList.contains('narrow-cols')) {
           let sc = 1;
           while (card.offsetHeight > PAGE_H_PX && sc > 0.56) {
@@ -2884,8 +2981,9 @@
       const topLen = Math.max(8, ...occ.map(d => d.DeskLabel.length + 3 + (blkShort ? 4 : 6) + String(d.BlockNum).length));
       const fitFs = (len, hi) => Math.max(7, Math.min(hi, Math.floor((deskPx - 9) / (len * 0.63) * 10) / 10));
 
-      // Rooms with MORE THAN 6 bench columns have very narrow cells: text flows down inside the cell and shrinks.
-      const narrow = colTypes.filter(t => t !== 'chair').length > 6;
+      // Rooms with MORE THAN 4 bench columns have narrow cells: text flows down inside the cell and shrinks only as needed.
+      const benchColCount = colTypes.filter(t => t !== 'chair').length;
+      const narrow = benchColCount > 4;
       const nwFs = (len, lo, hi) => Math.max(lo, Math.min(hi, Math.floor((deskPx - 6) / (Math.max(3, len) * 0.62) * 10) / 10));
       const nwTokLen = Math.max(4, ...occ.flatMap(d => [progShort(d.ProgramName).length, ...String(d.SubjectCode).split(', ').map(x => x.length)]));
 
@@ -2954,8 +3052,8 @@
       const card = document.createElement('div');
       card.className = 'rpt-card page-break fit';
       card.style.setProperty('--desk-h', '60px');
-      card.style.setProperty('--sub-fs', (narrow ? nwFs(nwTokLen, 6, 9) : fitFs(subLen, 12)) + 'px');
-      card.style.setProperty('--top-fs', (narrow ? nwFs(Math.max(7, topLen - 4), 6, 9) : fitFs(topLen, 12)) + 'px');
+      card.style.setProperty('--sub-fs', (narrow ? nwFs(nwTokLen, 6, 11) : fitFs(subLen, 12)) + 'px');
+      card.style.setProperty('--top-fs', (narrow ? nwFs(Math.max(7, topLen - 4), 6, 11) : fitFs(topLen, 12)) + 'px');
       if (narrow) card.classList.add('narrow-cols');
       card.innerHTML = `
         <div class="rpt-head" style="border-bottom-width:1px;padding-bottom:5px;margin-bottom:6px">
@@ -2973,7 +3071,6 @@
         ${t}
         <div class="rpt-foot" style="padding-top:8px;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:10px 18px">
           <span style="flex:1 1 380px">${seatingLabel} &middot; <b>Candidates:</b> ${sess.candidates} (Male: ${sess.male}, Female: ${sess.female})${sess.pwd ? ' (' + pwdWord() + ': ' + sess.pwd + ')' : ''}</span>
-          <span style="white-space:nowrap;margin-left:auto"><b>Junior Supervisor Signature:</b> ${blankLine(170)}</span>
         </div>`;
       fitCardToPage(card, 30, 80);
       return card;
@@ -2990,7 +3087,8 @@
       const rollW = `${((100 - rowHeadPct) * 0.62 / numCols).toFixed(3)}%`;
       const snoW = `${((100 - rowHeadPct) * 0.38 / numCols).toFixed(3)}%`;
       const rollPx = Math.floor((PRINT_W - 44) * 0.62 / numCols);
-      const narrow = colTypes.filter(t => t !== 'chair').length > 6;   // more than 6 bench columns
+      const benchColCount = colTypes.filter(t => t !== 'chair').length;
+      const narrow = benchColCount > 4;   // more than 4 bench columns: wrap text inside cells
       const hdrTxt = `${progShort(blk.program)} Roll No.`;
       const hdrFs = Math.max(8.5, Math.min(12.5, Math.floor((rollPx - 8) / (hdrTxt.length * 0.62) * 10) / 10));
 
@@ -3040,7 +3138,7 @@
               const bgStyle = special ? '' : `background-color: ${genderColors ? (isFem ? '#f3e8ff' : '#ccfbf1') : '#ffffff'} !important;`;
               const badge = isCanc ? '<span class="rpt-tag cancel">Cancel</span>' : (isDeb ? '<span class="rpt-tag debar">Debarred</span>' : '');
               const pwdBadge = cand.IsPWD ? '<span class="rpt-pwd">PWD</span>' : '';
-              const rfs = narrow ? rollFontPx(cand.RollNo, false, 0, rollPx, 15, 7)
+              const rfs = narrow ? rollFontPx(cand.RollNo, false, 0, rollPx, 20, 7)
                                  : rollFontPx(cand.RollNo, !!cand.IsPWD, isCanc ? 6 : (isDeb ? 8 : 0), rollPx, 20);
               const rollFsCss = narrow ? `calc(${rfs}px * var(--nw-scale, 1))` : `min(var(--roll-max, 20px), ${rfs}px)`;
 
@@ -3065,7 +3163,7 @@
       card.className = 'rpt-card page-break fit';
       card.style.setProperty('--desk-h', '50px');
       card.style.setProperty('--roll-max', '20px');
-      if (narrow) { card.classList.add('narrow-cols'); card.style.setProperty('--top-fs', '9.5px'); }
+      if (narrow) { card.classList.add('narrow-cols'); if (benchColCount > 6) card.style.setProperty('--top-fs', '9.5px'); }
       card.innerHTML = `
         <!-- Top Institutional Header & Block Identification -->
         <div style="padding-bottom:6px;border-bottom:2px solid #1e293b;margin-bottom:8px">
@@ -3158,7 +3256,7 @@
       const bgStyle = special ? '' : `background-color: ${genderColors ? (isFemale ? '#f3e8ff' : '#ccfbf1') : '#ffffff'} !important;`;
       const statusRemark = isCancelled ? '<span class="rpt-tag cancel">Cancel</span>' : (isDebarred ? '<span class="rpt-tag debar">Debarred</span>' : '');
       const pwdBadge = isPWDVal ? '<span class="rpt-pwd">PWD</span>' : '';
-      const rfs = narrow ? rollFontPx(cand.RollNo, false, 0, cellPx || 42, 15, 7)
+      const rfs = narrow ? rollFontPx(cand.RollNo, false, 0, cellPx || 42, 19, 7)
                          : rollFontPx(cand.RollNo, isPWDVal, isCancelled ? 6 : (isDebarred ? 8 : 0), cellPx || 100, 19);
       const rollFsCss = narrow ? `calc(${rfs}px * var(--nw-scale, 1))` : `min(var(--roll-max, 19px), ${rfs}px)`;
       const subHtml = narrow
