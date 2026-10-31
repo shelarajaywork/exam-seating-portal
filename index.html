@@ -411,6 +411,7 @@
                 <th class="p-2.5 border border-slate-300">BenchRows</th>
                 <th class="p-2.5 border border-slate-300">BenchCols</th>
                 <th class="p-2.5 border border-slate-300">Rows per Column (optional)</th>
+                <th class="p-2.5 border border-slate-300 text-center">Spread Seating</th>
                 <th class="p-2.5 border border-slate-300 text-center">Capacity (Seats)</th>
                 <th class="p-2.5 border border-slate-300">Status</th>
               </tr>
@@ -1189,6 +1190,7 @@
         const lay = saved[room] || { rows: '', cols: '', perCol: '' };
         lay.type = layoutType(lay);
         if (!lay.mixedConfig) lay.mixedConfig = '';
+        lay.spread = lay.spread !== false;   // Spread Seating defaults to ON for every room
         roomLayouts[room] = lay;
       });
     }
@@ -1327,6 +1329,9 @@
           <td class="p-2.5 border border-slate-300"><input type="number" min="1" data-f="rows" value="${esc(lay.rows)}" class="border border-slate-300 rounded px-2 py-1 w-16"></td>
           <td class="p-2.5 border border-slate-300"><input type="number" min="1" data-f="cols" value="${esc(lay.cols)}" class="border border-slate-300 rounded px-2 py-1 w-16"></td>
           <td class="p-2.5 border border-slate-300"><input type="text" data-f="perCol" value="${esc(lay.perCol)}" placeholder="e.g. 6,6,5,5" class="border border-slate-300 rounded px-2 py-1 w-32"></td>
+          <td class="p-2.5 border border-slate-300 text-center">
+            <input type="checkbox" data-spread class="h-4 w-4 accent-indigo-700 cursor-pointer" aria-label="Spread Seating" title="Checked: use all rows, filling columns from the left. Unchecked: Front-First (front rows only)." ${lay.spread !== false ? 'checked' : ''}>
+          </td>
           <td class="p-2.5 border border-slate-300 text-center font-semibold" data-cell="cap"></td>
           <td class="p-2.5 border border-slate-300" data-cell="status"></td>`;
         tr.querySelectorAll('input').forEach(inp => inp.addEventListener('input', () => {
@@ -1335,6 +1340,10 @@
           saveLayouts();
           updateOverview();
         }));
+        tr.querySelector('[data-spread]').addEventListener('change', e => {
+          roomLayouts[room].spread = e.target.checked;
+          saveLayouts();
+        });
         tr.querySelectorAll('[data-seat]').forEach(btn => btn.addEventListener('click', () => {
           roomLayouts[room].type = btn.dataset.seat;
           refreshRoomRow(tr, room);
@@ -1424,7 +1433,7 @@
       const bulkType = document.getElementById('bulkType').value;
       Object.keys(roomLayouts).forEach(r => {
         const type = bulkType === 'keep' ? layoutType(roomLayouts[r]) : bulkType;
-        roomLayouts[r] = { rows: String(rows), cols: String(cols), perCol: '', type, mixedConfig: roomLayouts[r]?.mixedConfig || '' };
+        roomLayouts[r] = { rows: String(rows), cols: String(cols), perCol: '', type, mixedConfig: roomLayouts[r]?.mixedConfig || '', spread: roomLayouts[r]?.spread !== false };
       });
       saveLayouts();
       renderRoomSetup();
@@ -1590,7 +1599,7 @@
         const typeTxt = String(o.type ?? '').trim().toLowerCase();
         const type = /mix/.test(typeTxt) ? 'mixed' : (/chair|single/.test(typeTxt) ? 'chair' : (/bench|double/.test(typeTxt) ? 'bench' : layoutType(roomLayouts[room])));
         const mixedConfig = String(o.mixedConfig ?? '').trim();
-        roomLayouts[room] = { rows: rows || '', cols: cols || '', perCol, type, mixedConfig: mixedConfig || roomLayouts[room]?.mixedConfig || '' };
+        roomLayouts[room] = { rows: rows || '', cols: cols || '', perCol, type, mixedConfig: mixedConfig || roomLayouts[room]?.mixedConfig || '', spread: roomLayouts[room]?.spread !== false };
         applied.push(room);
       });
       return { applied: [...new Set(applied)], unmatched, invalid };
@@ -2040,6 +2049,20 @@
         return h;
       }
 
+      // SPREAD SEATING (per room, default ON): use the FULL height of the room. Columns are filled completely,
+      // starting from the left-most column; the last column used may be partial and right-side columns may stay empty.
+      const spreadMode = !!(layoutOrSingle && typeof layoutOrSingle === 'object' && layoutOrSingle.spread !== false);
+      function spreadHeights(K) {
+        const h = colRows.map(() => 0);
+        let left = K;
+        for (let ci = 0; ci < colRows.length && left > 0; ci++) {
+          h[ci] = Math.min(colRows[ci], left);
+          left -= h[ci];
+        }
+        return h;
+      }
+      const limitHeights = spreadMode ? spreadHeights : frontHeights;
+
       // Students of one PROGRAM never share a bench (even for different subjects / semesters).
       const names = [...new Set(students.map(s => s.ProgramName))].sort(natCompare);
 
@@ -2148,7 +2171,7 @@
         search:
         for (const [level, sticky] of passes) {
           for (let K = Math.max(1, usedUnits); K <= fullBenches.length; K++) {
-            const bl = serpentine(frontHeights(K));
+            const bl = serpentine(limitHeights(K));
             const res = runWalk(level, sticky, bl);
             if (!res.unplaced.length) { best = res; activeBenches = bl; break search; }
           }
