@@ -411,7 +411,7 @@
                 <th class="p-2.5 border border-slate-300">BenchRows</th>
                 <th class="p-2.5 border border-slate-300">BenchCols</th>
                 <th class="p-2.5 border border-slate-300">Rows per Column (optional)</th>
-                <th class="p-2.5 border border-slate-300 text-center">Spread Seating</th>
+                <th class="p-2.5 border border-slate-300 text-center">Spread (Vertical/ Horizontal)</th>
                 <th class="p-2.5 border border-slate-300 text-center">Capacity (Seats)</th>
                 <th class="p-2.5 border border-slate-300">Status</th>
               </tr>
@@ -674,7 +674,7 @@
             <span>Gender Colors in PDF</span>
           </label>
           <!-- Direct Print / Save PDF -->
-          <button onclick="window.print()" class="bg-indigo-800 hover:bg-indigo-700 text-white px-5 py-2 rounded text-xs sm:text-sm font-bold shadow transition flex items-center space-x-2">
+          <button onclick="printWithReportName()" class="bg-indigo-800 hover:bg-indigo-700 text-white px-5 py-2 rounded text-xs sm:text-sm font-bold shadow transition flex items-center space-x-2">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
             <span>Print / Save PDF</span>
           </button>
@@ -1330,7 +1330,7 @@
           <td class="p-2.5 border border-slate-300"><input type="number" min="1" data-f="cols" value="${esc(lay.cols)}" class="border border-slate-300 rounded px-2 py-1 w-16"></td>
           <td class="p-2.5 border border-slate-300"><input type="text" data-f="perCol" value="${esc(lay.perCol)}" placeholder="e.g. 6,6,5,5" class="border border-slate-300 rounded px-2 py-1 w-32"></td>
           <td class="p-2.5 border border-slate-300 text-center">
-            <input type="checkbox" data-spread class="h-4 w-4 accent-indigo-700 cursor-pointer" aria-label="Spread Seating" title="Checked: use all rows, filling columns from the left. Unchecked: Front-First (front rows only)." ${lay.spread !== false ? 'checked' : ''}>
+            <input type="checkbox" data-spread class="h-4 w-4 accent-indigo-700 cursor-pointer" aria-label="Spread (Vertical/ Horizontal)" title="Checked = Vertical spread: use all rows, filling columns from the left. Unchecked = Horizontal (Front-First): fill front rows first." ${lay.spread !== false ? 'checked' : ''}>
           </td>
           <td class="p-2.5 border border-slate-300 text-center font-semibold" data-cell="cap"></td>
           <td class="p-2.5 border border-slate-300" data-cell="status"></td>`;
@@ -3336,12 +3336,33 @@
     }
     const seatsFlat = ss => ss.flatMap(seatsOf);
 
+    // Browsers use document.title as the default PDF file name, so set it to "<Report Name> dd.mm.yy" while printing.
+    function printWithReportName() {
+      const names = {
+        supervisor: "Supervisor's Report",
+        notices: 'Room Notices',
+        plan: 'Notice Board Plan',
+        both: 'Notice Board Plan and Room Notices'
+      };
+      const m = String(currentDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      const dateTag = m ? `${m[3]}.${m[2]}.${m[1].slice(2)}` : '';
+      const base = names[currentDoorView] || 'Report';
+      const originalTitle = document.title;
+      document.title = dateTag ? `${base} ${dateTag}` : base;
+      const restore = () => {
+        document.title = originalTitle;
+        window.removeEventListener('afterprint', restore);
+      };
+      window.addEventListener('afterprint', restore);
+      window.print();
+    }
+
     function printSupervisorReport(date) {
       currentDate = date;
       document.getElementById('dateSelect').value = date;
       setDoorView('supervisor');
       switchTab('doorChartTab');
-      window.print();
+      printWithReportName();
     }
 
     function printDoorPlanReport(date) {
@@ -3349,7 +3370,7 @@
       document.getElementById('dateSelect').value = date;
       setDoorView('plan');
       switchTab('doorChartTab');
-      window.print();
+      printWithReportName();
     }
 
     function printNoticesReport(date) {
@@ -3357,7 +3378,7 @@
       document.getElementById('dateSelect').value = date;
       setDoorView('notices');
       switchTab('doorChartTab');
-      window.print();
+      printWithReportName();
     }
 
     function needAllocation() {
